@@ -1,0 +1,13 @@
+pandas
+scikit-learn
+numpy
+transformers
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.0
+
+# openai
+# nltk
+# scipy
+# sentence_transformers
+# bert_score
