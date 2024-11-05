@@ -1,7 +1,13 @@
 pandas
+scipy
 scikit-learn
 numpy
 transformers
+
+flashrag-dev[core]
+wikiextractor==0.1
+sentence-transformers
+einops
 
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.4.0

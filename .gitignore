@@ -4,3 +4,12 @@ data/train/*
 data/val/*
 !data/val/scripts/*
 !data/val/README-v2.md
+
+retriever/en_wiki/*
+retriever/temp/*
+
+*.bz2
+*.csv
+*.index
+
+__pycache__/*
