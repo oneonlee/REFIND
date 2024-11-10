@@ -14,5 +14,4 @@ python -m spacy download en_core_web_lg
 sh scripts/download_en_wiki_dump.sh
 sh scripts/preprocess_wiki.sh
 sh scripts/build_index.sh
-
 ```

@@ -10,9 +10,12 @@ from pathlib import Path
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool
+from typing import List, Tuple
+
+nlp = spacy.load("en_core_web_lg")
 
 
-def load_corpus(dir_path):
+def load_corpus(dir_path, args):
     def iter_files(path):
         """Walk through all files located under a root path."""
         if os.path.isfile(path):
@@ -24,7 +27,7 @@ def load_corpus(dir_path):
         else:
             raise RuntimeError("Path %s is invalid" % path)
 
-    def read_jsonl_file(file_path):
+    def read_jsonl_file(file_path, corpus):
         with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
                 json_data = json.loads(line)
@@ -35,7 +38,7 @@ def load_corpus(dir_path):
 
     with ThreadPoolExecutor(max_workers=args.num_workers) as executor:
         for file_path in all_files:
-            executor.submit(read_jsonl_file, file_path)
+            executor.submit(read_jsonl_file, file_path, corpus)
 
     return corpus
 
@@ -72,7 +75,7 @@ def basic_process(title, text):
     if text.endswith(". References."):
         text = text[: -len(" References.")].strip()
 
-    text = re.sub("\{\{cite .*?\}\}", " ", text, flags=re.DOTALL)
+    text = re.sub(r"\{\{cite .*?\}\}", " ", text, flags=re.DOTALL)
     text = text.replace(r"TABLETOREPLACE", " ")
     text = text.replace(r"'''", " ")
     text = text.replace(r"[[", " ")
@@ -145,7 +148,15 @@ def basic_process(title, text):
 
 
 def split_list(lst, n):
-    """Split a list into n roughly equal parts."""
+    """Split a list into n roughly equal parts.
+    
+    Args:
+        lst (list): The list to be split.
+        n (int): The number of parts to split the list into.
+
+    Returns:
+        list of lists: A list containing n sublists.
+    """
     k, m = divmod(len(lst), n)
     return [lst[i * k + min(i, m) : (i + 1) * k + min(i + 1, m)] for i in range(n)]
 
@@ -161,12 +172,32 @@ def single_worker(docs):
     return results
 
 
+def list_to_txt(lst: List[Tuple[str, str]], path):
+    with open(path, "w", encoding="utf-8") as f:
+        for item in lst:
+            title = item[0]
+            text = item[1]
+            title, text = line.split("\t", 1)
+
+def txt_to_lists(path) -> Tuple[List[str], List[str]]:
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        all_title = []
+        all_text = []
+        for line in lines:
+            title, text = line.split("\t")
+            all_title.append(title)
+            all_text.append(text)
+        return all_title, all_text
+    
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate clean wiki corpus file for indexing.")
     parser.add_argument("--dump_path", type=str)
     parser.add_argument("--chunk_by", default="100w", choices=["100w", "sentence"], type=str)
-    parser.add_argument("--seg_size", default=None, type=int)
-    parser.add_argument("--stride", default=None, type=int)
+    parser.add_argument("--batch_size", default=2000, type=int, help="Batch size for spaCy nlp.pipe")
+    parser.add_argument("--seg_size", default=512, type=int)
+    parser.add_argument("--stride", default=1, type=int)
     parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument("--save_path", type=str, default="clean_corpus.jsonl")
     args = parser.parse_args()
@@ -193,78 +224,58 @@ if __name__ == "__main__":
     else:
         print("Skip extracting wiki dump as temp folder already exists.")
 
-    corpus = load_corpus(temp_dir)
-    nlp = spacy.load("en_core_web_lg")
+    temp_path = os.path.join(temp_dir, "result_list.txt")
 
-    documents = {}
-    # To avoid duplicate pages
-    for item in tqdm(corpus, desc="Loading documents"):
-        title = item["title"]
-        text = item["text"]
-        if title in documents:
-            documents[title] += " " + text
-        else:
-            documents[title] = text
+    if os.path.exists(temp_path):
+        print("Skip processing wiki dump as temp result_list file already exists.")
+        all_title, all_text = txt_to_lists(temp_path)
+    else:
+        corpus = load_corpus(temp_dir, args)
 
-    print("Start pre-processing...")
-    documents = list(documents.items())
+        documents = {}
+        # To avoid duplicate pages
+        for item in tqdm(corpus, desc="Loading documents"):
+            title = item["title"]
+            text = item["text"]
+            if title in documents:
+                documents[title] += " " + text
+            else:
+                documents[title] = text
 
-    with Pool(processes=args.num_workers) as p:
-        result_list = list(tqdm(p.imap(single_worker, split_list(documents, args.num_workers)), desc="Processing documents in parallel"))
-    print("Processing documents done")
-    result_list = sum(result_list, [])
+        print("Start pre-processing...")
+        documents = list(documents.items())
 
-    all_title = [item[0] for item in result_list]
-    all_text = [item[1] for item in result_list]
+        with Pool(processes=args.num_workers) as p:
+            result_list = list(tqdm(p.imap(single_worker, split_list(documents, args.num_workers)), desc="Processing documents in parallel"))
+        print("Processing documents done")
+        result_list = sum(result_list, [])
 
-    print("Start chunking...")
-    idx = 0
+        list_to_txt(result_list, temp_path)
+
+        all_title = [item[0] for item in result_list]
+        all_text = [item[1] for item in result_list]
+        del result_list
+
+
+    print(f"Start chunking by {args.chunk_by}...")
     clean_corpus = []
-    if args.chunk_by == "sentence":
-        for doc in tqdm(nlp.pipe(all_text, n_process=args.num_workers, batch_size=2000), total=len(all_text), desc="Chunking documents by sentence"):
-            title = all_title[idx]
-            idx += 1
-            sentences = [sent.text.strip() for sent in doc.sents]
-            segments = []
-            for i in range(0, len(sentences), args.stride):
-                segment = " ".join(sentences[i : i + args.seg_size])
-                segments.append(segment)
-                if i + args.seg_size >= len(sentences):
-                    break
-            for segment in segments:
-                text = segment.replace("\n", " ").replace("\t", " ")
-                clean_corpus.append({"title": title, "text": text})
+    if args.chunk_by == "sentence": # chunk by sentence
+        for idx, item in enumerate(tqdm(zip(all_title, all_text), desc="Chunking documents")):
+            title = item[0]
+            text = item[1]
+            segments = create_segments(text, args.seg_size, args.stride)
+            for seg in segments:
+                clean_corpus.append({"title": title, "text": seg})
 
-    elif args.chunk_by == "100w":
-        for doc in tqdm(nlp.pipe(all_text, n_process=args.num_workers, batch_size=2000), total=len(all_text), desc="Chunking documents by 100 words"):
-            title = all_title[idx]
-            idx += 1
-            segments = []
-            word_count = 0
-            segment_tokens = []
-            for token in doc:
-                segment_tokens.append(token.text_with_ws)
-                if not token.is_space and not token.is_punct:
-                    word_count += 1
-                    if word_count == 100:
-                        word_count = 0
-                        segments.append("".join([token for token in segment_tokens]))
-                        segment_tokens = []
-            if word_count != 0:
-                for token in doc:
-                    segment_tokens.append(token.text_with_ws)
-                    if not token.is_space and not token.is_punct:
-                        word_count += 1
-                        if word_count == 100:
-                            word_count = 0
-                            segments.append("".join([token for token in segment_tokens]))
-                            break
-            if word_count != 0:
-                segments.append("".join([token for token in segment_tokens]))
 
-            for segment in segments:
-                text = segment.replace("\n", " ").replace("\t", " ")
-                clean_corpus.append({"title": title, "text": text})
+    elif args.chunk_by == "100w": # chunk by 100 words
+        for idx, item in enumerate(tqdm(zip(all_title, all_text), desc="Chunking documents")):
+            title = item[0]
+            text = item[1]
+            text = text.split()
+            for i in range(0, len(text), 100):
+                seg = " ".join(text[i : i + 100])
+                clean_corpus.append({"title": title, "text": seg})
 
     # shutil.rmtree(temp_dir)
 

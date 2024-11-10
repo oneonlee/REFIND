@@ -7,9 +7,14 @@ data/val/*
 
 retriever/en_wiki/*
 retriever/temp/*
+retriever/*.json
+retriever/*.jsonl
 
 *.bz2
 *.csv
 *.index
 
 __pycache__/*
+*/__pycache__/*
+*.log
+*.pyc

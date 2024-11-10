@@ -1,11 +1,11 @@
-python -m flashrag.retriever.index_builder \
+CUDA_VISIBLE_DEVICES=1 python retriever/index_builder.py \
     --retrieval_method e5 \
     --model_path intfloat/multilingual-e5-large \
-    --corpus_path retriever/en_wiki_corpus.jsonl \
+    --corpus_path retriever/en_wiki_corpus_w100.jsonl \
     --save_dir retriever/ \
-    # --use_fp16 \
     --max_length 512 \
-    --batch_size 256 \
+    --batch_size 8192 \
     --sentence_transformer \
+    --save_embedding \
     --faiss_gpu \
     --faiss_type Flat 
