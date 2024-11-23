@@ -1,12 +1,15 @@
-# TOTEM
+# REFIND
 SemEval-2025 Task-3 — Mu-SHROOM
 
 ## Installation
 ```bash
+conda create -n REFIND python=3.9
+conda activate REFIND
+```
+
+```bash
 pip install -r requirements.txt
-pip install flash-attn --no-build-isolation
 conda install -c pytorch -c nvidia faiss-gpu=1.8.0
-python -m spacy download en_core_web_lg
 ```
 
 ## Retriever Preparation
