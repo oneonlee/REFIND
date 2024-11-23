@@ -1,19 +1,19 @@
-pandas
-scipy<1.13.0
-scikit-learn
-numpy
-transformers
+# pandas
+# scipy<1.13.0
+# scikit-learn
+# numpy
+# transformers
 
-flashrag-dev[core]
+# --extra-index-url https://download.pytorch.org/whl/cu121
+# torch==2.4.0
+
+
+langchain
+langchain_community
+langchain_huggingface
+jq
 wikiextractor==0.1
-sentence-transformers
-einops
 
---extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.4.0
+python-dotenv
 
-# openai
-# nltk
-# scipy
-# sentence_transformers
-# bert_score
+# conda install -c pytorch -c nvidia faiss-gpu=1.8.0

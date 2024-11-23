@@ -1,18 +1,16 @@
 import argparse
-from tqdm import tqdm
-import re
 import html
-import spacy
 import os
+import re
 import json
-import subprocess
-from pathlib import Path
 import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool
+from pathlib import Path
 from typing import List, Tuple
 
-nlp = spacy.load("en_core_web_lg")
+from tqdm import tqdm
 
 
 def load_corpus(dir_path, args):
@@ -41,21 +39,6 @@ def load_corpus(dir_path, args):
             executor.submit(read_jsonl_file, file_path, corpus)
 
     return corpus
-
-
-def create_segments(doc_text, max_length, stride):
-    doc_text = doc_text.strip()
-    doc = nlp(doc_text)
-    sentences = [sent.text.strip() for sent in doc.sents]
-    segments = []
-
-    for i in range(0, len(sentences), stride):
-        segment = " ".join(sentences[i : i + max_length])
-        segments.append(segment)
-        if i + max_length >= len(sentences):
-            break
-
-    return segments
 
 
 def basic_process(title, text):
@@ -177,7 +160,7 @@ def list_to_txt(lst: List[Tuple[str, str]], path):
         for item in lst:
             title = item[0]
             text = item[1]
-            title, text = line.split("\t", 1)
+            f.write(f"{title}\t{text}\n")
 
 def txt_to_lists(path) -> Tuple[List[str], List[str]]:
     with open(path, "r", encoding="utf-8") as f:
@@ -194,10 +177,6 @@ def txt_to_lists(path) -> Tuple[List[str], List[str]]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate clean wiki corpus file for indexing.")
     parser.add_argument("--dump_path", type=str)
-    parser.add_argument("--chunk_by", default="100w", choices=["100w", "sentence"], type=str)
-    parser.add_argument("--batch_size", default=2000, type=int, help="Batch size for spaCy nlp.pipe")
-    parser.add_argument("--seg_size", default=512, type=int)
-    parser.add_argument("--stride", default=1, type=int)
     parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument("--save_path", type=str, default="clean_corpus.jsonl")
     args = parser.parse_args()
@@ -257,27 +236,13 @@ if __name__ == "__main__":
         del result_list
 
 
-    print(f"Start chunking by {args.chunk_by}...")
     clean_corpus = []
-    if args.chunk_by == "sentence": # chunk by sentence
-        for idx, item in enumerate(tqdm(zip(all_title, all_text), desc="Chunking documents")):
-            title = item[0]
-            text = item[1]
-            segments = create_segments(text, args.seg_size, args.stride)
-            for seg in segments:
-                clean_corpus.append({"title": title, "text": seg})
 
+    for idx, item in enumerate(tqdm(zip(all_title, all_text), desc="Chunking documents")):
+        title = item[0]
+        text = item[1]
+        clean_corpus.append({"title": title, "text": text})
 
-    elif args.chunk_by == "100w": # chunk by 100 words
-        for idx, item in enumerate(tqdm(zip(all_title, all_text), desc="Chunking documents")):
-            title = item[0]
-            text = item[1]
-            text = text.split()
-            for i in range(0, len(text), 100):
-                seg = " ".join(text[i : i + 100])
-                clean_corpus.append({"title": title, "text": seg})
-
-    # shutil.rmtree(temp_dir)
 
     print("Start saving corpus...")
     with open(args.save_path, "w", encoding="utf-8") as f:
@@ -285,4 +250,5 @@ if __name__ == "__main__":
             title = f"\"{item['title']}\""
             item = {"id": idx, "title": title, "text": item["text"]}
             f.write(json.dumps(item) + "\n")
+    shutil.rmtree(temp_dir)
     print("Finish!")

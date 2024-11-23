@@ -1,11 +1,1 @@
-CUDA_VISIBLE_DEVICES=1 python retriever/index_builder.py \
-    --retrieval_method e5 \
-    --model_path intfloat/multilingual-e5-large \
-    --corpus_path retriever/en_wiki_corpus_w100.jsonl \
-    --save_dir retriever/ \
-    --max_length 512 \
-    --batch_size 8192 \
-    --sentence_transformer \
-    --save_embedding \
-    --faiss_gpu \
-    --faiss_type Flat 
+python retriever/build_index.py
