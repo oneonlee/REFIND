@@ -5,6 +5,8 @@ data/val/*
 !data/val/scripts/*
 !data/val/README-v2.md
 
+logs/*
+
 retriever/en_wiki/*
 retriever/temp/*
 retriever/*.json
