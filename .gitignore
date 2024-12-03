@@ -7,10 +7,14 @@ data/val/*
 
 logs/*
 
-retriever/en_wiki/*
-retriever/temp/*
+model/prediction/*
+!model/prediction/val/.gitkeep
+
+
+retriever/faiss_db
 retriever/*.json
 retriever/*.jsonl
+!retriever/sample_wiki_corpus.jsonl
 
 *.bz2
 *.csv
