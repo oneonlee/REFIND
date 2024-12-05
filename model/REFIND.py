@@ -1,10 +1,17 @@
 import argparse as ap
 import json
 import os
+import sys
+
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
 
 import numpy as np
 import pandas as pd
+import torch
+from scorer import recompute_hard_labels
 from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 def load_jsonl_file(filename):
@@ -21,6 +28,19 @@ def load_jsonl_file(filename):
 def softmax(logits):
     exp_logits = np.exp(logits - np.max(logits))
     return exp_logits / exp_logits.sum(axis=-1, keepdims=True)
+
+
+def get_token_logit(model, tokenizer, input_text, target_token_id):
+    # 입력 텍스트 토큰화
+    model_inputs = tokenizer([input_text], return_tensors="pt").to("cuda")
+
+    # 토큰 logits 계산
+    with torch.no_grad():
+        outputs = model(**model_inputs)
+        logits = outputs.logits[0, -1]
+
+    logit = logits[target_token_id].item()
+    return logit
 
 
 def main(input_file, output_file):
