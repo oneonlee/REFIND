@@ -1,3 +1,6 @@
+import os
+import pickle
+
 import numpy as np
 import yaml
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -11,33 +14,50 @@ from typing import Dict, List, Union
 class Retriever:
     def __init__(
         self, 
-        yaml_config_path: str = "config/en_config.yaml"
+        yaml_config_path: str = "config/en_config.yaml",
+        use_cache: bool = True
     ):
         with open(yaml_config_path) as f:
             self.config = yaml.load(f, Loader=yaml.FullLoader)
 
+        cache_directory = os.path.dirname(self.config["HybridRetriever"]["input_file_path"])
+        cache_file_name = f"split_docs_cache-{os.path.basename(self.config["Retriever"]["input_file_path"])}-chunk_size_{self.config["Retriever"]["parameters"]["retrieval_chunk_size"]}-chunk_overlap_{self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"]}.pkl"
+        cache_file_path = os.path.join(cache_directory, cache_file_name)
+        if use_cache and os.path.exists(cache_file_path):
+            print("Retriever: Load split_docs cache")
+            with open(cache_file_path, "rb") as f:
+                self.split_docs = pickle.load(f)
+            print("Retriever: split_docs Loaded")
+        else:
+            print("Retriever: Load documents")
+            loader = JSONLoader(
+                file_path=self.config["Retriever"]["input_file_path"],
+                jq_schema=".text",
+                text_content=False,
+                json_lines=True,
+            )
+
+            print("Retriever: Split documents")
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.config["Retriever"]["parameters"]["retrieval_chunk_size"],
+                chunk_overlap=self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"],
+                length_function=len,
+                is_separator_regex=False,
+            )
+
+            print("Retriever: Loading and splitting documents...")
+            split_docs = loader.load_and_split(text_splitter)
+            del loader, text_splitter
+
+            if use_cache:
+                print("Retriever: Save split_docs cache")
+                with open(cache_file_path, "wb") as f:
+                    pickle.dump(split_docs, f, pickle.HIGHEST_PROTOCOL)
+                print("Retriever: split_docs Saved")
+
         self.retrieval_top_k = self.config["Retriever"]["parameters"]["retrieval_top_k"]
-
-        print("Retriever: Load documents")
-        loader = JSONLoader(
-            file_path=self.config["Retriever"]["input_file_path"],
-            jq_schema=".text",
-            text_content=False,
-            json_lines=True,
-        )
-
-        print("Retriever: Split documents")
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.config["Retriever"]["parameters"]["retrieval_chunk_size"],
-            chunk_overlap=self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"],
-            length_function=len,
-            is_separator_regex=False,
-        )
-
-        print("Retriever: Loading and splitting documents...")
-        split_docs = loader.load_and_split(text_splitter)
-
         self.langchain_retriever = BM25Retriever.from_documents(split_docs, k=self.retrieval_top_k)
+        del split_docs
         print("Retriever: Initialized")
 
 
@@ -56,7 +76,8 @@ class Retriever:
 class HybridRetriever(Retriever):
     def __init__(
         self, 
-        yaml_config_path: str = "config/en_config.yaml"
+        yaml_config_path: str = "config/en_config.yaml",
+        use_cache: bool = True
     ):
         with open(yaml_config_path) as f:
             self.config = yaml.load(f, Loader=yaml.FullLoader)
@@ -68,28 +89,45 @@ class HybridRetriever(Retriever):
             encode_kwargs={"normalize_embeddings": True},
         )
 
-        print("HybridRetriever: Load documents")
-        loader = JSONLoader(
-            file_path=self.config["HybridRetriever"]["input_file_path"],
-            jq_schema=".text",
-            text_content=False,
-            json_lines=True,
-        )
+        cache_directory = os.path.dirname(self.config["HybridRetriever"]["input_file_path"])
+        cache_file_name = f"split_docs_cache-{os.path.basename(self.config["Retriever"]["input_file_path"])}-chunk_size_{self.config["Retriever"]["parameters"]["retrieval_chunk_size"]}-chunk_overlap_{self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"]}.pkl"
+        cache_file_path = os.path.join(cache_directory, cache_file_name)
+        if use_cache and os.path.exists(cache_file_path):
+            print("HybridRetriever: Load split_docs cache")
+            with open(cache_file_path, "rb") as f:
+                self.split_docs = pickle.load(f)
+            print("HybridRetriever: split_docs Loaded")
+        else:
+            print("HybridRetriever: Load documents")
+            loader = JSONLoader(
+                file_path=self.config["HybridRetriever"]["input_file_path"],
+                jq_schema=".text",
+                text_content=False,
+                json_lines=True,
+            )
 
-        print("HybridRetriever: Split documents")
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.config["HybridRetriever"]["parameters"]["retrieval_chunk_size"],
-            chunk_overlap=self.config["HybridRetriever"]["parameters"]["retrieval_chunk_overlap"],
-            length_function=len,
-            is_separator_regex=False,
-        )
+            print("HybridRetriever: Split documents")
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.config["HybridRetriever"]["parameters"]["retrieval_chunk_size"],
+                chunk_overlap=self.config["HybridRetriever"]["parameters"]["retrieval_chunk_overlap"],
+                length_function=len,
+                is_separator_regex=False,
+            )
 
-        print("HybridRetriever: Loading and splitting documents...")
-        split_docs = loader.load_and_split(text_splitter)
+            print("HybridRetriever: Loading and splitting documents...")
+            split_docs = loader.load_and_split(text_splitter)
+            del loader, text_splitter
+
+            if use_cache:
+                print("HybridRetriever: Save split_docs cache")
+                with open(cache_file_path, "wb") as f:
+                    pickle.dump(split_docs, f, pickle.HIGHEST_PROTOCOL)
+                print("HybridRetriever: split_docs Saved")
 
         self.retrieval_top_k = self.config["HybridRetriever"]["parameters"]["retrieval_top_k"]
         self.reranking_top_k = self.config["HybridRetriever"]["parameters"]["reranking_top_k"]
         self.langchain_retriever = BM25Retriever.from_documents(split_docs, k=self.retrieval_top_k)
+        del split_docs
         print("HybridRetriever: Initialized")
 
 
