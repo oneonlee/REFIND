@@ -7,11 +7,15 @@ numpy
 # --extra-index-url https://download.pytorch.org/whl/cu121
 # torch==2.4.0
 
+gguf>=0.10.0
+sentencepiece
+accelerate
 
 langchain
 langchain_community
 langchain_huggingface
 jq
 wikiextractor==0.1
+rank_bm25
 
 # conda install -c pytorch -c nvidia faiss-gpu=1.8.0

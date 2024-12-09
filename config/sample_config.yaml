@@ -1,0 +1,20 @@
+REFIND:
+  retriever: Retriever
+  # retriever: HybridRetriever
+  threshold_list: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.01, 0.05, 0.001, 0.005, 0.0001, 0.0005, 0.00001, 0.00005, 0.000001, 0.000005]
+Retriever:
+  input_file_path: retriever/sample_wiki_corpus.jsonl
+  # input_file_path: retriever/en_wiki_corpus.jsonl
+  parameters:
+    retrieval_chunk_size: 600
+    retrieval_chunk_overlap: 30
+    retrieval_top_k: 5
+HybridRetriever:
+  input_file_path: retriever/sample_wiki_corpus.jsonl
+  # input_file_path: retriever/en_wiki_corpus.jsonl
+  embedding_model_path: intfloat/multilingual-e5-large
+  parameters:
+    retrieval_chunk_size: 600
+    retrieval_chunk_overlap: 30
+    retrieval_top_k: 10
+    reranking_top_k: 5

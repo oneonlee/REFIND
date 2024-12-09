@@ -10,11 +10,11 @@ logs/*
 model/prediction/*
 !model/prediction/val/.gitkeep
 
-
-retriever/faiss_db
 retriever/*.json
 retriever/*.jsonl
 !retriever/sample_wiki_corpus.jsonl
+
+scripts/sbatch_*.sh
 
 *.bz2
 *.csv
