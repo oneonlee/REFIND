@@ -89,7 +89,7 @@ def score_cor(ref_dict, pred_dict):
 
 
 def main(ref_dicts, pred_dicts, output_file=None):
-    assert len(ref_dicts) == len(pred_dicts)
+    assert len(ref_dicts) == len(pred_dicts), f"Mismatched number of records. ({len(ref_dicts)} != {len(pred_dicts)})"
     ious = np.array([score_iou(r, d) for r, d in zip(ref_dicts, pred_dicts)])
     cors = np.array([score_cor(r, d) for r, d in zip(ref_dicts, pred_dicts)])
     if output_file is not None:
