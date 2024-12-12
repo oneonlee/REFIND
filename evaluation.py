@@ -21,20 +21,24 @@ def main():
 
     input_instances = []
     for pred_filepath, pred_filename in zip(pred_filepath_list, pred_filename_list):
-        ref_dicts = load_jsonl_file_to_records(args.valid_filepath)
-        pred_dicts = load_jsonl_file_to_records(pred_filepath)
-        
+        try:
+            ref_dicts = load_jsonl_file_to_records(args.valid_filepath, is_ref=True)
+            pred_dicts = load_jsonl_file_to_records(pred_filepath, is_ref=False)
+        except AttributeError as e:
+            print(f"Error: {e}")
+            continue
 
-
+        print(f"Scoring {pred_filename}...")
         ious, cors = scorer_main(ref_dicts, pred_dicts, output_file=None)
         score_dict = {
-            pred_filename: {
-                "IoU": ious,
-                "Cor": cors,
+            pred_filename.replace(".jsonl", ""): {
+                "IoU": ious.mean(),
+                "Cor": cors.mean()
             }
         }
         input_instances.append(score_dict)
 
+    print(input_instances)
     write_jsonl(input_instances, score_filepath)
         
 
