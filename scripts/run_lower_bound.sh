@@ -1,3 +1,5 @@
+#!/bin/sh
+
 valid_filepath="data/val/mushroom.en-val.v2.jsonl"
 pred_filepath="model/prediction/val/en_lower_bound.jsonl"
 score_filepath="result/scores_lower_bound.json"
