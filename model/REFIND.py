@@ -253,17 +253,23 @@ def _get_token_logit(
     return logit
 
 
+def _get_tokens_ids_and_offsets_mapping(
+    tokenizer,
+    model_output_text,
+):
+    encoding = tokenizer(model_output_text, return_offsets_mapping=True, add_special_tokens=True)
+    model_output_token_ids = encoding.input_ids
+
+    return model_output_token_ids, encoding.offset_mapping
+
+
 def compute_output_probs(
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     model_input_text: str,
-    model_output_tokens: List[str],
+    model_output_token_ids: List[int],
     return_logits: bool = False
 ):
-    if model_output_tokens[-1] != tokenizer.eos_token:
-        model_output_tokens.append(tokenizer.eos_token)
-    model_output_token_ids = tokenizer.convert_tokens_to_ids(model_output_tokens) # [20832, 344, 2431, 13341, 298, 776, 2107, 241, 7635, 21934, 272, 248, 204, 853, 35, 9912, 20591, 272, 19630, 23, 3603, 25, 11]
-    
     model_output_logits = []
     current_model_input = model_input_text
     for target_token_id in model_output_token_ids:
@@ -311,10 +317,11 @@ def main():
 
     threshold_list = config["REFIND"]["threshold_list"]
     total_predictions = {condition: {threshold: [] for threshold in threshold_list} for condition in HALLUCINATION_CONDITIONS.keys()}
-    for model_id in model_id_list:
+    for idx in range(len(model_id_list)):
         # model_id 별로 hallucination detection 수행
+        model_id = model_id_list[idx]
         records = model_wise_records[model_id]
-        print(f"MODEL: {model_id}, Total Model Ids: {len(model_id_list)}")
+        print(f"\nREFIND: ({idx+1}/{len(model_id_list)}) {model_id}")
 
         if "gguf" in model_id.lower():
             model_id = model_id.replace("\/", "/")
@@ -352,24 +359,19 @@ def main():
                     [25,31],
                     [45,49],
                     [69,83]
-                ],
-                "model_output_logits":[
-                    -5.5669536591,-11.90533638,-13.0743436813,-9.9514026642,-8.8359375,-5.2216725349,-8.8481779099,-9.2853775024,-7.6449022293,-8.7612609863,-9.1256427765,-5.7042989731,-5.7393956184,-8.409078598,-10.6083183289,-11.707988739,-5.3747014999,-6.5602250099,-5.1362328529,-5.7765812874,-8.4669551849,-8.3430461884,-8.7018699646
-                ],
-                "model_output_tokens":[
-                    ["Pet","ra","\u0120van","\u0120Sto","ve","ren","\u0120won","\u0120a","\u0120silver","\u0120medal","\u0120in","\u0120the","\u0120","200","8","\u0120Summer","\u0120Olympics","\u0120in","\u0120Beijing",",","\u0120China",".","<|endoftext|>"
                 ]
             }
             """
             assert record['model_id'] == model_id, f"Model ID mismatch: {record['model_id']} vs {model_id}"
 
             model_input_text = record['model_input'] # "What did Petra van Staveren win a gold medal for?"
-            model_input_tokens = tokenizer.tokenize(model_input_text)  # ['What', 'Ġdid', 'ĠPetra', 'Ġvan', 'ĠSt', 'ave', 'ren', 'Ġwin', 'Ġa', 'Ġgold', 'Ġmedal', 'Ġfor', '?']
             model_output_text = record['model_output_text'] # "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
-            model_output_tokens = tokenizer.tokenize(model_output_text, add_special_tokens=True)
-            model_output_tokens.append(tokenizer.eos_token) # ["Pet","ra","\u0120van","\u0120Sto","ve","ren","\u0120won","\u0120a","\u0120silver","\u0120medal","\u0120in","\u0120the","\u0120","200","8","\u0120Summer","\u0120Olympics","\u0120in","\u0120Beijing",",","\u0120China",".","<|endoftext|>"]
-            
-            model_output_probs, model_output_logits = compute_output_probs(model, tokenizer, model_input_text, model_output_tokens, return_logits=True)
+            model_output_token_ids, offsets_mapping = _get_tokens_ids_and_offsets_mapping(tokenizer, model_output_text)
+            assert offsets_mapping[-1][1] == len(model_output_text), "Offsets mapping and model output text mismatch!"
+            assert len(model_output_token_ids) == len(offsets_mapping), "Token IDs and offsets mapping mismatch!"
+            model_output_probs, model_output_logits = compute_output_probs(model, tokenizer, model_input_text, model_output_token_ids, return_logits=True)
+            assert len(model_output_probs) == len(model_output_logits), "Logits and output probabilities mismatch!"
+            assert len(offsets_mapping) == len(model_output_probs), "Offsets mapping and output probabilities mismatch!"
 
             reference_passages = retriever.retrieve(query=model_input_text, return_type="text")
             if args.use_debug:
@@ -377,25 +379,37 @@ def main():
             assert reference_passages is not None, "Reference passages are not provided!"
 
             model_input_with_context = INPUT_PROMPT_TEMPLATE.format(references=reference_passages, question=model_input_text)
-            context_given_model_output_probs, context_given_model_output_logits = compute_output_probs(model, tokenizer, model_input_with_context, model_output_tokens, return_logits=True)
+            context_given_model_output_probs, context_given_model_output_logits = compute_output_probs(model, tokenizer, model_input_with_context, model_output_token_ids, return_logits=True)
+            assert len(context_given_model_output_probs) == len(context_given_model_output_logits), "Logits and output probabilities mismatch!"
+            assert len(context_given_model_output_probs) == len(model_output_probs), "Model output probabilities with/without context mismatch!"
+            assert len(context_given_model_output_probs) == len(offsets_mapping), "Offsets mapping and output probabilities mismatch!"
 
+            # Post-processing logits, probabilities, and offsets
+            start_idx_of_processed_offsets = 0
+            for offset_idx in range(len(offsets_mapping)):
+                if offsets_mapping[offset_idx][0] == 0:
+                    start_idx_of_processed_offsets = offset_idx
+                else:
+                    break
+            offsets_mapping = offsets_mapping[start_idx_of_processed_offsets:]
+            model_output_logits = model_output_logits[start_idx_of_processed_offsets:]
+            model_output_probs = model_output_probs[start_idx_of_processed_offsets:]
+            context_given_model_output_logits = context_given_model_output_logits[start_idx_of_processed_offsets:]
+            context_given_model_output_probs = context_given_model_output_probs[start_idx_of_processed_offsets:]
+            
             for condition in HALLUCINATION_CONDITIONS.keys():
                 for threshold in threshold_list:
                     hallucination_span_ranges = []
                     hallucination_span_ranges_with_probs = []
-                    for i, token in enumerate(model_output_tokens):
-                        if args.use_debug:
-                            print(f"{token}: {model_output_probs[i]} -> {context_given_model_output_probs[i]}", end="\t")
+                    # for i, token in enumerate(offsets_mapping):
+                    for i, span in zip(range(len(model_output_token_ids)), offsets_mapping):
+                        start_span, end_span = span
 
                         # Hallucination Detection Rule
                         if HALLUCINATION_CONDITIONS[condition](model_output_probs, context_given_model_output_probs, i, threshold):
                             if args.use_debug:
                                 print(f"Hallucination Detected!")
 
-                            start_span = 0
-                            for j in range(i):
-                                start_span += len(model_output_tokens[j])
-                            end_span = start_span + len(token)
                             confidence = 1 - model_output_probs[i]
                             hallucination_span_ranges.append([start_span, end_span])
                             hallucination_span_ranges_with_probs.append({
@@ -435,15 +449,9 @@ def main():
                         'hard_labels': hallucination_span_ranges, # e.g., `[[6,10],[61,72]]`
                         'soft_labels': hallucination_span_ranges_with_probs, # e.g., `"[{"start":1,"prob":0.9090909091,"end":6}]`
                         'model_input': record['model_input'], # e.g., "What did Petra van Staveren win a gold medal for?"
-                        'model_input_tokens': model_input_tokens, # e.g., `["What","Ġdid","ĠPetra","Ġvan","ĠSt","ave","ren","Ġwin","Ġa","Ġgold","Ġmedal","Ġfor","?"]`
                         'model_output_text': record['model_output_text'], # e.g., "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
-                        'model_output_tokens': model_output_tokens, # e.g., `["Pet","ra","\u0120van","\u0120Sto","ve","ren","\u0120won","\u0120a","\u0120silver","\u0120medal","\u0120in","\u0120the","\u0120","200","8","\u0120Summer","\u0120Olympics","\u0120in","\u0120Beijing",",","\u0120China",".","
-                        'model_output_logits': model_output_logits, # e.g., `[-5.5669536591,-11.90533638,-13.0743436813,-9.9514026642,-8.8359375,-5.2216725349,-8.8481779099,-9.2853775024,-7.6449022293,-8.7612609863,-9.1256427765,-5.7042989731,-5.7393956184,-8.409078598,-10.6083183289,-11.707988739,-5.3747014999,-6.5602250099,-5.1362328529,-5.7765812874,-8.4669551849,-8.3430461884,-8.7018699646]`
-                        'model_output_probs': model_output_probs.tolist(), # e.g., `[1.16355852e-01, 2.05619164e-04, 6.38807739e-05, 1.45092920e-03, 4.42676620e-03, 1.64339483e-01, 4.37291105e-03, 2.82421186e-03, 1.45662122e-02, 4.76999785e-03, 3.31336425e-03, 1.01423809e-01, 9.79259149e-02, 6.78373776e-03, 7.52231251e-04, 2.50478573e-04, 1.41020510e-01, 4.30939162e-02, 1.78997885e-01, 9.43513475e-02, 6.40226386e-03, 7.24680478e-03, 5.06187453e-03]`
                         'reference': reference_passages,
                         'model_input_with_context': model_input_with_context,
-                        'context_given_model_output_logits': context_given_model_output_logits,
-                        'context_given_model_output_probs': context_given_model_output_probs.tolist(),
                         'model_id': model_id,
                     })
 
@@ -453,7 +461,10 @@ def main():
     for condition in HALLUCINATION_CONDITIONS.keys():
         for threshold in threshold_list:
             predictions = total_predictions[condition][threshold]
-            output_filepath = os.path.join(args.output_directory, os.path.basename(args.yaml_filepath), f"{predictions[0]['lang'].lower()}_REFIND_{condition}_{threshold}.jsonl")
+            output_file_directory = os.path.join(args.output_directory, os.path.basename(args.yaml_filepath.replace(".yaml", "")))
+            if not os.path.exists(output_file_directory):
+                os.makedirs(output_file_directory)
+            output_filepath = os.path.join(output_file_directory, f"{predictions[0]['lang'].lower()}_REFIND_{condition}_{threshold}.jsonl")
             write_jsonl(predictions, output_filepath)
 
 

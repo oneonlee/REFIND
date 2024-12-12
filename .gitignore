@@ -7,11 +7,15 @@ data/val/*
 
 logs/*
 
+result/*
+
 model/prediction/*
+model/baseline-ckpt/*
 !model/prediction/val/.gitkeep
 
 retriever/*.json
 retriever/*.jsonl
+retriever/*.pkl
 !retriever/sample_wiki_corpus.jsonl
 
 scripts/sbatch_*.sh

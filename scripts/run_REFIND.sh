@@ -1,3 +1,5 @@
+#!/bin/sh
+
 valid_filepath="data/val/mushroom.en-val.v2.jsonl"
 pred_directory="model/prediction/val"
 # pred_filepath="model/prediction/val/en_REFIND_${hallucination_condition}.jsonl"
@@ -6,7 +8,7 @@ pred_directory="model/prediction/val"
 pwd
 
 python3 "model/REFIND.py" \
-    --yaml_filepath "config/en_config.yaml" \
+    --yaml_filepath "config/sample_config.yaml" \
     --input_filepath $valid_filepath \
     --output_directory $pred_directory \
     --device "cuda"

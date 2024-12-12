@@ -21,12 +21,12 @@ class Retriever:
             self.config = yaml.load(f, Loader=yaml.FullLoader)
 
         cache_directory = os.path.dirname(self.config["HybridRetriever"]["input_file_path"])
-        cache_file_name = f"split_docs_cache-{os.path.basename(self.config["Retriever"]["input_file_path"])}-chunk_size_{self.config["Retriever"]["parameters"]["retrieval_chunk_size"]}-chunk_overlap_{self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"]}.pkl"
+        cache_file_name = f'split_docs_cache-{os.path.basename(self.config["Retriever"]["input_file_path"])}-chunk_size_{self.config["Retriever"]["parameters"]["retrieval_chunk_size"]}-chunk_overlap_{self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"]}.pkl'
         cache_file_path = os.path.join(cache_directory, cache_file_name)
         if use_cache and os.path.exists(cache_file_path):
             print("Retriever: Load split_docs cache")
             with open(cache_file_path, "rb") as f:
-                self.split_docs = pickle.load(f)
+                split_docs = pickle.load(f)
             print("Retriever: split_docs Loaded")
         else:
             print("Retriever: Load documents")
@@ -90,12 +90,12 @@ class HybridRetriever(Retriever):
         )
 
         cache_directory = os.path.dirname(self.config["HybridRetriever"]["input_file_path"])
-        cache_file_name = f"split_docs_cache-{os.path.basename(self.config["Retriever"]["input_file_path"])}-chunk_size_{self.config["Retriever"]["parameters"]["retrieval_chunk_size"]}-chunk_overlap_{self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"]}.pkl"
+        cache_file_name = f'split_docs_cache-{os.path.basename(self.config["Retriever"]["input_file_path"])}-chunk_size_{self.config["Retriever"]["parameters"]["retrieval_chunk_size"]}-chunk_overlap_{self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"]}.pkl'
         cache_file_path = os.path.join(cache_directory, cache_file_name)
         if use_cache and os.path.exists(cache_file_path):
             print("HybridRetriever: Load split_docs cache")
             with open(cache_file_path, "rb") as f:
-                self.split_docs = pickle.load(f)
+                split_docs = pickle.load(f)
             print("HybridRetriever: split_docs Loaded")
         else:
             print("HybridRetriever: Load documents")
