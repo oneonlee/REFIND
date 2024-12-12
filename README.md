@@ -14,9 +14,7 @@ pip install -r requirements.txt
 
 ## Retriever Preparation
 ```bash
-sh scripts/download_en_wiki_dump.sh
 sh scripts/preprocess_wiki.sh
-# sh scripts/build_index.sh
 ```
 
 ## Experiment
