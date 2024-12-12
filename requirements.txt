@@ -3,6 +3,9 @@ scipy<1.13.0
 # scikit-learn
 numpy
 # transformers
+vllm # for FAVA
+datasets<3.0.0
+seqeval
 
 # --extra-index-url https://download.pytorch.org/whl/cu121
 # torch==2.4.0
