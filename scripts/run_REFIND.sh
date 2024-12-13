@@ -1,6 +1,6 @@
 #!/bin/sh
 
-valid_filepath="data/val/mushroom.en-val.v2.jsonl"
+valid_filepath="data/val/context-mushroom.en-val.v2.jsonl"
 pred_directory="model/prediction/val"
 # pred_filepath="model/prediction/val/en_REFIND_${hallucination_condition}.jsonl"
 # score_filepath="result/scores_REFIND_${hallucination_condition}.txt"

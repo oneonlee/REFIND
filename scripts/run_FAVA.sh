@@ -1,6 +1,6 @@
 #!/bin/sh
 
-valid_filepath="data/val/mushroom.en-val.v2.jsonl"
+valid_filepath="data/val/context-mushroom.en-val.v2.jsonl"
 pred_directory="model/prediction/val"
 
 pwd

@@ -2,7 +2,7 @@ init.sh
 data/train/*
 !data/train/README-v1.md
 data/val/*
-!data/val/scripts/*
+!data/val/scripts
 !data/val/README-v2.md
 
 logs/*

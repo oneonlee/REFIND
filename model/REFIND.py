@@ -1,5 +1,4 @@
 import argparse as ap
-import json
 import os
 import sys
 
@@ -7,13 +6,10 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
 import numpy as np
-import pandas as pd
 import scipy
 import torch
 import yaml
-from lib import write_jsonl
-from retriever.retriever import Retriever, HybridRetriever
-from scorer import recompute_hard_labels
+from lib import load_jsonl_file, write_jsonl
 from tqdm import tqdm
 from typing import List
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -61,7 +57,6 @@ HALLUCINATION_CONDITIONS = {
     "probability_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= threshold,
     "context_probability_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: context_given_model_output_probs[i] < threshold,
     "context_probability_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: context_given_model_output_probs[i] >= threshold,
-    "scaled_probability_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < threshold * context_given_model_output_probs[i],
     "max_probability_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < max(context_given_model_output_probs) * threshold,
     "mean_probability_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] - np.mean(context_given_model_output_probs) < threshold,
     # "local_variance_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0,i-2):i+3]) >= threshold * np.var(context_given_model_output_probs[max(0,i-2):i+3]),
@@ -82,7 +77,6 @@ HALLUCINATION_CONDITIONS = {
     "relative_entropy_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum(model_output_probs[i] * np.log((model_output_probs[i] + 1e-8)/(context_given_model_output_probs[i] + 1e-8))) >= threshold,
     # "windowed_variance_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0,i-4):i+1])/np.var(context_given_model_output_probs[max(0,i-4):i+1]) >= threshold,
     # "probability_momentum_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - model_output_probs[i-1 if i>0 else i]) < threshold * (context_given_model_output_probs[i] - context_given_model_output_probs[i-1 if i>0 else i]),
-    "scaled_probability_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= threshold * context_given_model_output_probs[i],
     "difference_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] - context_given_model_output_probs[i] >= threshold,
     "difference_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] - context_given_model_output_probs[i] < threshold,
     "absolute_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - context_given_model_output_probs[i]) >= threshold,
@@ -189,7 +183,6 @@ HALLUCINATION_CONDITIONS = {
     # "probability_windowed_moving_average_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.mean(model_output_probs[max(0,i-3):i+1]) < np.mean(model_output_probs[max(0,i-4):i]) - threshold,
     # "probability_windowed_moving_variance": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0,i-3):i+1]) > threshold,
     "context_probability_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(context_given_model_output_probs[i] - model_output_probs[i]) >= threshold,
-    "probability_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] / (context_given_model_output_probs[i] + 1e-8)) >= threshold,
     "context_probability_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] / (model_output_probs[i] + 1e-8)) >= threshold,
     "probability_log_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.log(model_output_probs[i] + 1e-8) - np.log(context_given_model_output_probs[i] + 1e-8)) >= threshold,
     "context_probability_log_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.log(context_given_model_output_probs[i] + 1e-8) - np.log(model_output_probs[i] + 1e-8)) >= threshold,
@@ -217,17 +210,6 @@ HALLUCINATION_CONDITIONS = {
     # "spectral_density_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum(np.abs(np.fft.fft(model_output_probs[max(0,i-5):i+6]) - np.fft.fft(context_given_model_output_probs[max(0,i-5):i+6]))) > threshold,
     "probability_distribution_shift": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.ks_2samp(model_output_probs, context_given_model_output_probs).pvalue < threshold,
 }
-
-
-def load_jsonl_file(filename):
-    """read data from a JSONL file and format that as a `pandas.DataFrame`. 
-    Performs minor format checks (ensures that soft_labels are present, optionally compute hard_labels on the fly)."""
-    df = pd.read_json(filename, lines=True)
-    if 'hard_labels' not in df.columns:
-        df['hard_labels'] = df.soft_labels.apply(recompute_hard_labels)
-    # adding an extra column for convenience
-    df['text_len'] = df.model_output_text.apply(len)
-    return df.to_dict(orient='records')
 
 
 def softmax(logits):
@@ -308,13 +290,6 @@ def main():
     with open(args.yaml_filepath, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
-    if config["REFIND"]["retriever"].lower() == "retriever":
-        retriever = Retriever(args.yaml_filepath)
-    elif config["REFIND"]["retriever"].lower() in ["hybrid_retriever", "hybrid", "hybridretriever"]:
-        retriever = HybridRetriever(args.yaml_filepath)
-    else:
-        raise ValueError(f"Invalid retriever type: {config['REFIND']['retriever']}")
-
     threshold_list = config["REFIND"]["threshold_list"]
     total_predictions = {condition: {threshold: [] for threshold in threshold_list} for condition in HALLUCINATION_CONDITIONS.keys()}
     for idx in range(len(model_id_list)):
@@ -373,10 +348,10 @@ def main():
             assert len(model_output_probs) == len(model_output_logits), "Logits and output probabilities mismatch!"
             assert len(offsets_mapping) == len(model_output_probs), "Offsets mapping and output probabilities mismatch!"
 
-            reference_passages = retriever.retrieve(query=model_input_text, return_type="text")
-            if args.use_debug:
-                print(reference_passages)
+            reference_passages = record["context"]
             assert reference_passages is not None, "Reference passages are not provided!"
+            if isinstance(reference_passages, list):
+                reference_passages = "\n".join(reference_passages)
 
             model_input_with_context = INPUT_PROMPT_TEMPLATE.format(references=reference_passages, question=model_input_text)
             context_given_model_output_probs, context_given_model_output_logits = compute_output_probs(model, tokenizer, model_input_with_context, model_output_token_ids, return_logits=True)

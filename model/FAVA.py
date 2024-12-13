@@ -8,12 +8,9 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
 import numpy as np
-import pandas as pd
 import vllm
 import yaml
-from lib import write_jsonl
-from retriever.retriever import Retriever, HybridRetriever
-from scorer import recompute_hard_labels
+from lib import load_jsonl_file, write_jsonl
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
@@ -26,17 +23,6 @@ args = p.parse_args()
 
 
 INPUT = "Read the following references:\n{evidence}\nPlease identify all the errors in the following text using the information in the references provided and suggest edits if necessary:\n[Text] {output}\n[Edited] "
-
-
-def load_jsonl_file(filename):
-    """read data from a JSONL file and format that as a `pandas.DataFrame`. 
-    Performs minor format checks (ensures that soft_labels are present, optionally compute hard_labels on the fly)."""
-    df = pd.read_json(filename, lines=True)
-    if 'hard_labels' not in df.columns:
-        df['hard_labels'] = df.soft_labels.apply(recompute_hard_labels)
-    # adding an extra column for convenience
-    df['text_len'] = df.model_output_text.apply(len)
-    return df.to_dict(orient='records')
 
 
 def softmax(logits):
@@ -188,19 +174,11 @@ if __name__ == "__main__":
     with open(args.yaml_filepath, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
-    if config["FAVA"]["retriever"].lower() == "retriever":
-        retriever = Retriever(args.yaml_filepath)
-    elif config["FAVA"]["retriever"].lower() in ["hybrid_retriever", "hybrid", "hybridretriever"]:
-        retriever = HybridRetriever(args.yaml_filepath)
-    else:
-        raise ValueError(f"Invalid retriever type: {config['FAVA']['retriever']}")
-
     predictions = []
     for record in tqdm(records, desc='Processing records'):
         model_input_text = record['model_input'] # "What did Petra van Staveren win a gold medal for?"
         model_output_text = record['model_output_text'] # "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
-
-        reference_passages = retriever.retrieve(query=model_input_text, return_type="list")
+        reference_passages = record['context']
         assert reference_passages is not None, "Reference passages are not provided!"
 
         hard_labels, soft_labels = predict_hallucinations(
