@@ -5,9 +5,7 @@ for lang in ar de en es fi fr it zh; do
     valid_filepath="data/val/context-mushroom.${lang}-val.v2.jsonl"
     yaml_filepath="config/${lang}_config.yaml"
 
-    python3 "model/REFIND.py" \
+    python3 "data/val/scripts/retrieve_contexts.py" \
         --yaml_filepath $yaml_filepath \
-        --input_filepath $valid_filepath \
-        --output_directory $pred_directory \
-        --device "cuda"
-done 
+        --input_filepath $valid_filepath
+done
