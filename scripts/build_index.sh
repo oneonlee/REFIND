@@ -1,1 +1,0 @@
-python retriever/build_index.py

@@ -1,31 +1,44 @@
 # REFIND: Retrieval Augmented Factual Hallucination Detection in Large Language Models
-SemEval-2025 Task-3 — Mu-SHROOM
 
-## Installation
+![](assets/overview.png)
+
+- Task & Dataset Info
+    - [SemEval-2025 Task-3 — Mu-SHROOM](https://helsinki-nlp.github.io/shroom/)
+
+
+## Usage
+### Installation
 ```bash
 conda create -n REFIND python=3.9
 conda activate REFIND
+pip install -r requirements.txt
 python -m nltk.downloader punkt
 python -m nltk.downloader punkt_tab
 ```
 
-```bash
-pip install -r requirements.txt
-# conda install -c pytorch -c nvidia faiss-gpu=1.8.0
-```
-
-## Retriever Preparation
-```bash
-sh scripts/preprocess_en_wiki.sh
-```
-
-## Experiment
-```bash
-sh scripts/run_baseline_random_guess.sh
-cat result/scores_baseline_random_guess-0bootstrap.json
-cat result/scores_baseline_random_guess-10000bootstrap.json
-```
+### Preparation
+Download Mu-SHROOM Dataset from [Official Website](https://helsinki-nlp.github.io/shroom/#data) and put it in the [`data` directory](data/README.md).
 
 ```bash
-# WIP
+# Retriever Preprocessing
+sh scripts/preprocess_wiki.sh
 ```
+
+### Experiment
+```bash
+# Our Method
+sh scripts/run_REFIND.sh
+
+# Baselines
+sh scripts/run_random_guess.sh
+sh scripts/run_XLM-R.sh
+sh scripts/run_FAVA.sh
+
+## Evaluation
+sh scripts/evaluate.sh
+```
+
+## References
+- [Official Website of Mu-SHROOM](https://helsinki-nlp.github.io/shroom/)
+- [Official GitHub Repository of Mu-SHROOM](https://github.com/Helsinki-NLP/shroom)
+- [Official Participant Kit of Mu-SHROOM](https://a3s.fi/mickusti-2007780-pub/participant_kit.zip)
