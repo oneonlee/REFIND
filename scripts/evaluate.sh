@@ -1,11 +1,10 @@
 #!/bin/bash
 
-valid_filepath="data/val/mushroom.en-val.v2.jsonl"
-pred_directory="model/prediction/val"
 score_directory="result"
+for lang in ar de en es fi fr it zh; do
+    valid_filepath="data/val/mushroom.${lang}-val.v2.jsonl"
+    pred_directory="model/prediction/val/${lang}_config"
 
-
-for config_name in ""; do
     python evaluation.py \
         --valid_filepath $valid_filepath \
         --pred_directory "$pred_directory/$config_name" \
