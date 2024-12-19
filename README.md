@@ -5,6 +5,8 @@ SemEval-2025 Task-3 — Mu-SHROOM
 ```bash
 conda create -n REFIND python=3.9
 conda activate REFIND
+python -m nltk.downloader punkt
+python -m nltk.downloader punkt_tab
 ```
 
 ```bash
@@ -14,7 +16,7 @@ pip install -r requirements.txt
 
 ## Retriever Preparation
 ```bash
-sh scripts/preprocess_wiki.sh
+sh scripts/preprocess_en_wiki.sh
 ```
 
 ## Experiment

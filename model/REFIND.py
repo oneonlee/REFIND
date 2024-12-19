@@ -6,12 +6,11 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
 import numpy as np
-import scipy
 import torch
 import yaml
 from lib import load_jsonl_file, write_jsonl
 from tqdm import tqdm
-from typing import List
+from typing import List, Tuple
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -23,175 +22,25 @@ p.add_argument('--device', type=str, default='cuda')
 p.add_argument('--use_debug', action='store_true')
 args = p.parse_args()
 
-
-INPUT_PROMPT_TEMPLATE = (
-    "You are an assistant for answering questions.\n"
-    "Refer to the references below and answer the following question.\n\n"
-    "### References\n"
-    "{references}\n\n"
-    "### Question\n"
-    "{question}\n"
-    "### Answer\n"
-)
-
-HALLUCINATION_CONDITIONS = {
-    # "local_probability_drop": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i-1] - model_output_probs[i]) >= threshold if i >= 0 else False,
-    # "local_probability_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - model_output_probs[i-1]) >= threshold if i >= 0 else False,
-    # "context_local_probability_drop": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i-1] - context_given_model_output_probs[i]) >= threshold if i >= 0 else False,
-    # "context_local_probability_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) >= threshold if i >= 0 else False,
-    # "probability_cumulative_sum_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.sum(model_output_probs[:i+1]) - np.sum(context_given_model_output_probs[:i+1])) >= threshold,
-    # "probability_cumulative_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (np.sum(model_output_probs[:i+1]) / (np.sum(context_given_model_output_probs[:i+1]) + 1e-8)) < threshold,
-    # "probability_variance_exceeds": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0, i - 2):i + 3]) >= threshold,
-    # "context_probability_std_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.std(context_given_model_output_probs[max(0, i - 2):i + 3]) < threshold,
-    # "probability_spike": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - np.mean(model_output_probs[max(0, i - 2):i] + model_output_probs[i+1:i+3])) >= threshold,
-    "probability_deviation_from_context_mean": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - np.mean(context_given_model_output_probs)) >= threshold,
-    "probability_ratio_to_context_mean": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] / (np.mean(context_given_model_output_probs) + 1e-8)) < threshold,
-    # "probability_change_rate_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs((model_output_probs[i] - model_output_probs[i-1]) - (context_given_model_output_probs[i] - context_given_model_output_probs[i-1])) >= threshold if i >= 0 else False,
-    # "probability_derivative_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: ((model_output_probs[i] - model_output_probs[i-1]) / (context_given_model_output_probs[i] - context_given_model_output_probs[i-1] + 1e-8)) < threshold if i >= 0 else False,
-    "probability_median_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - np.median(model_output_probs)) >= threshold,
-    # "probability_cumulative_product_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.prod(model_output_probs[:i+1]) < threshold,
-    "probability_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= context_given_model_output_probs[i],
-    "probability_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < threshold,
-    "probability_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= threshold,
-    "context_probability_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: context_given_model_output_probs[i] < threshold,
-    "context_probability_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: context_given_model_output_probs[i] >= threshold,
-    "max_probability_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < max(context_given_model_output_probs) * threshold,
-    "mean_probability_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] - np.mean(context_given_model_output_probs) < threshold,
-    # "local_variance_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0,i-2):i+3]) >= threshold * np.var(context_given_model_output_probs[max(0,i-2):i+3]),
-    "entropy_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: -np.sum(model_output_probs[i] * np.log(model_output_probs[i] + 1e-8)) >= threshold,
-    # "rolling_average_deviation": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - np.mean(model_output_probs[max(0,i-5):i])) >= threshold,
-    "context_probability_ratio_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i]/context_given_model_output_probs[i] - 1) >= threshold,
-    # "weighted_probability_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - context_given_model_output_probs[i]) * (i+1)/len(model_output_probs) < threshold,
-    # "cumulative_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum(model_output_probs[:i+1] - context_given_model_output_probs[:i+1]) < threshold,
-    # "moving_median_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < np.median(context_given_model_output_probs[max(0,i-3):i+4]) * threshold,
-    # "local_maximum_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i]/max(model_output_probs[max(0,i-2):i+3]) < threshold,
-    "relative_entropy_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum(model_output_probs[i] * np.log((model_output_probs[i] + 1e-8)/(context_given_model_output_probs[i] + 1e-8))) >= threshold,
-    # "windowed_variance_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0,i-4):i+1])/np.var(context_given_model_output_probs[max(0,i-4):i+1]) >= threshold,
-    # "probability_momentum_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - model_output_probs[i-1 if i>0 else i]) < threshold * (context_given_model_output_probs[i] - context_given_model_output_probs[i-1 if i>0 else i]),
-    "difference_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] - context_given_model_output_probs[i] < threshold,
-    "absolute_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - context_given_model_output_probs[i]) < threshold,
-    "relative_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - context_given_model_output_probs[i]) / context_given_model_output_probs[i] >= threshold,
-    "ratio_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] / context_given_model_output_probs[i]) >= threshold,
-    "variation_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (abs(model_output_probs[i] - context_given_model_output_probs[i]) / ((model_output_probs[i] + context_given_model_output_probs[i]) / 2)) >= threshold,
-    "probability_below_mean": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < np.mean(model_output_probs) * threshold,
-    "probability_above_mean": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.mean(model_output_probs) * threshold,
-    "probability_outlier": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - np.mean(model_output_probs)) >= threshold * np.std(model_output_probs),
-    "probability_above_median": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.median(model_output_probs) * threshold,
-    "probability_above_min": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.min(model_output_probs) * threshold,
-    "probability_below_max": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < np.max(model_output_probs) * threshold,
-    "probability_above_max": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.max(model_output_probs) * threshold,
-    "probability_below_quantile": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < np.quantile(model_output_probs, threshold),
-    "probability_above_quantile": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.quantile(model_output_probs, threshold),
-    "probability_below_context_mean": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < np.mean(context_given_model_output_probs) * threshold,
-    "probability_above_context_mean": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.mean(context_given_model_output_probs) * threshold,
-    "probability_above_context_median": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.median(context_given_model_output_probs) * threshold,
-    "probability_above_context_max": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.max(context_given_model_output_probs) * threshold,
-    "probability_above_context_quantile": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] >= np.quantile(context_given_model_output_probs, threshold),
-    "probability_log_ratio_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.log(model_output_probs[i] / (context_given_model_output_probs[i] + 1e-8)) >= threshold,
-    "probability_z_score_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - np.mean(model_output_probs)) / (np.std(model_output_probs) + 1e-8) < threshold,
-    "context_probability_z_score_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] - np.mean(context_given_model_output_probs)) / (np.std(context_given_model_output_probs) + 1e-8) < threshold,
-    "probability_relative_difference_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: (abs(model_output_probs[i] - context_given_model_output_probs[i]) / ((abs(context_given_model_output_probs[i]) + abs(model_output_probs[i])) / 2 + 1e-8)) < threshold,
-    "probability_relative_difference_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (abs(model_output_probs[i] - context_given_model_output_probs[i]) / ((abs(context_given_model_output_probs[i]) + abs(model_output_probs[i])) / 2 + 1e-8)) >= threshold,
-    # "probability_cumulative_sum_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum(model_output_probs[:i+1]) < threshold,
-    # "probability_cumulative_sum_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum(model_output_probs[:i+1]) >= threshold,
-    "probability_ratio_change_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] / (context_given_model_output_probs[i] + 1e-8)) - 1 >= threshold,
-    # "probability_derivative_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - model_output_probs[i-1]) < threshold,
-    # "probability_derivative_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - model_output_probs[i-1]) >= threshold,
-    # "probability_context_derivative_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) < threshold,
-    # "probability_context_derivative_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) >= threshold,
-    # "probability_second_derivative_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) < threshold,
-    # "probability_second_derivative_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) >= threshold,
-    # "probability_context_second_derivative_below": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) < threshold,
-    # "probability_context_second_derivative_above": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) >= threshold,
-    # "probability_derivative_sign_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(model_output_probs[i-1] - model_output_probs[i-2]),
-    # "probability_second_derivative_sign_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(model_output_probs[i-1] - 2 * model_output_probs[i-2] + model_output_probs[i-3]),
-    # "probability_derivative_sign_change_context": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) != np.sign(context_given_model_output_probs[i-1] - context_given_model_output_probs[i-2]),
-    # "probability_second_derivative_sign_change_context": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) != np.sign(context_given_model_output_probs[i-1] - 2 * context_given_model_output_probs[i-2] + context_given_model_output_probs[i-3]),
-    # "probability_derivative_sign_change_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(model_output_probs[i-1] - model_output_probs[i-2]) and np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(context_given_model_output_probs[i] - context_given_model_output_probs[i-1]),
-    # "probability_second_derivative_sign_change_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(model_output_probs[i-1] - 2 * model_output_probs[i-2] + model_output_probs[i-3]) and np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]),
-    # # "probability_derivative_sign_change_ratio_context": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) != np.sign(context_given_model_output_probs[i-1] - context_given_model_output_probs[i-2]) and np.sign(context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) != np.sign(model_output_probs[i] - model_output_probs[i-1]),
-    # "probability_second_derivative_sign_change_ratio_context": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) != np.sign(context_given_model_output_probs[i-1] - 2 * context_given_model_output_probs[i-2] + context_given_model_output_probs[i-3]) and np.sign(context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) != np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]),
-    # "probability_derivative_sign_change_ratio_derivative": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(model_output_probs[i-1] - model_output_probs[i-2]) and np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(model_output_probs[i] - context_given_model_output_probs[i-1]),
-    # "probability_second_derivative_sign_change_ratio_derivative": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(model_output_probs[i-1] - 2 * model_output_probs[i-2] + model_output_probs[i-3]) and np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]),
-    # "probability_derivative_sign_change_ratio_derivative_context": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) != np.sign(context_given_model_output_probs[i-1] - context_given_model_output_probs[i-2]) and np.sign(context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) != np.sign(context_given_model_output_probs[i] - model_output_probs[i-1]),
-    # "probability_second_derivative_sign_change_ratio_derivative_context": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) != np.sign(context_given_model_output_probs[i-1] - 2 * context_given_model_output_probs[i-2] + context_given_model_output_probs[i-3]) and np.sign(context_given_model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) != np.sign(context_given_model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]),
-    # "probability_derivative_sign_change_ratio_derivative_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(model_output_probs[i-1] - model_output_probs[i-2]) and np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(model_output_probs[i] - context_given_model_output_probs[i-1]) and np.sign(model_output_probs[i] - model_output_probs[i-1]) != np.sign(model_output_probs[i] - model_output_probs[i-1]),
-    # "probability_second_derivative_sign_change_ratio_derivative_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(model_output_probs[i-1] - 2 * model_output_probs[i-2] + model_output_probs[i-3]) and np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(model_output_probs[i] - 2 * context_given_model_output_probs[i-1] + context_given_model_output_probs[i-2]) and np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) != np.sign(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]),
-    "probability_difference_percentage": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - context_given_model_output_probs[i]) / max(context_given_model_output_probs[i], 1e-8) >= threshold,
-    # "probability_moving_average_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.mean(model_output_probs[max(0, i-3):i+1]) < np.mean(model_output_probs[max(0, i-4):i]) - threshold,
-    "probability_relative_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - context_given_model_output_probs[i]) / (context_given_model_output_probs[i] + 1e-8) >= threshold,
-    # "probability_threshold_cross": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < threshold and model_output_probs[i-1] >= threshold if i > 0 else False,
-    # "probability_gradient_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(model_output_probs[i] - 2 * model_output_probs[i-1] + model_output_probs[i-2]) >= threshold if i >=2 else False,
-    # "probability_exponential_moving_average_dropout": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < np.exp(-threshold) * np.mean(model_output_probs[max(0, i-5):i]),
-    # "probability_variance_threshold": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0, i-4):i+1]) >= threshold,
-    # "probability_kurtosis_high": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.kurtosis(model_output_probs[max(0, i-5):i+1]) >= threshold,
-    # "probability_skewness_positive": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.skew(model_output_probs[max(0, i-5):i+1]) >= threshold,
-    # "probability_windowed_maximum": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] == np.max(model_output_probs[max(0, i-3):i+4]) and model_output_probs[i] >= threshold,
-    # "probability_windowed_minimum": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] == np.min(model_output_probs[max(0, i-3):i+4]) and model_output_probs[i] < threshold,
-    # "sliding_window_entropy": lambda model_output_probs, context_given_model_output_probs, i, threshold: -np.sum(model_output_probs[max(0,i-2):i+3] * np.log(model_output_probs[max(0,i-2):i+3] + 1e-8)) > threshold,
-    # "cosine_similarity_drop": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.dot(model_output_probs[max(0,i-2):i+3], context_given_model_output_probs[max(0,i-2):i+3]) / (np.linalg.norm(model_output_probs[max(0,i-2):i+3]) * np.linalg.norm(context_given_model_output_probs[max(0,i-2):i+3])) < threshold,
-    # "exponential_weighted_diff": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum([(0.9**j) * abs(model_output_probs[i-j] - context_given_model_output_probs[i-j]) for j in range(min(5,i+1))]) > threshold,
-    # "local_peak_detection": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > max(model_output_probs[max(0,i-1):i] + model_output_probs[i+1:min(len(model_output_probs),i+2)]) + threshold,
-    # "rolling_std_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.std(model_output_probs[max(0,i-3):i+1]) / (np.std(context_given_model_output_probs[max(0,i-3):i+1]) + 1e-8) > threshold,
-    # "momentum_shift": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs((model_output_probs[i] - model_output_probs[i-1]) - (context_given_model_output_probs[i] - context_given_model_output_probs[i-1])) > threshold if i > 0 else False,
-    # "quantile_deviation": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] < np.quantile(context_given_model_output_probs[max(0,i-5):i+1], threshold),
-    # "jensen_shannon_divergence": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.spatial.distance.jensenshannon(model_output_probs[max(0,i-2):i+3], context_given_model_output_probs[max(0,i-2):i+3]) > threshold,
-    "weighted_relative_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs((model_output_probs[i] - context_given_model_output_probs[i]) / (context_given_model_output_probs[i] + 1e-8)) * (i/len(model_output_probs)) > threshold,
-    # "probability_windowed_mean": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.mean(model_output_probs[max(0,i-3):i+4]) + threshold,
-    # "probability_windowed_std": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.std(model_output_probs[max(0,i-3):i+4]) + threshold,
-    # "probability_windowed_median": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.median(model_output_probs[max(0,i-3):i+4]) + threshold,
-    # "probability_windowed_quantile": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.quantile(model_output_probs[max(0,i-3):i+4], threshold) + threshold,
-    # "probability_windowed_kurtosis": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.kurtosis(model_output_probs[max(0,i-3):i+4]) > threshold,
-    # "probability_windowed_skewness": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.skew(model_output_probs[max(0,i-3):i+4]) > threshold,
-    # "probability_windowed_entropy": lambda model_output_probs, context_given_model_output_probs, i, threshold: -np.sum(model_output_probs[max(0,i-3):i+4] * np.log(model_output_probs[max(0,i-3):i+4] + 1e-8)) > threshold,
-    # "probability_windowed_cosine_similarity": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.dot(model_output_probs[max(0,i-3):i+4], context_given_model_output_probs[max(0,i-3):i+4]) / (np.linalg.norm(model_output_probs[max(0,i-3):i+4]) * np.linalg.norm(context_given_model_output_probs[max(0,i-3):i+4])) > threshold,
-    # "probability_windowed_jensen_shannon_divergence": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.spatial.distance.jensenshannon(model_output_probs[max(0,i-3):i+4], context_given_model_output_probs[max(0,i-3):i+4]) > threshold,
-    "probability_windowed_weighted_relative_change": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs((model_output_probs[i] - context_given_model_output_probs[i]) / (context_given_model_output_probs[i] + 1e-8)) * (i/len(model_output_probs)) > threshold,
-    # "probability_windowed_moving_average": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.mean(model_output_probs[max(0,i-3):i+1]) + threshold,
-    # "probability_windowed_moving_std": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.std(model_output_probs[max(0,i-3):i+1]) + threshold,
-    # "probability_windowed_moving_median": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.median(model_output_probs[max(0,i-3):i+1]) + threshold,
-    # "probability_windowed_moving_quantile": lambda model_output_probs, context_given_model_output_probs, i, threshold: model_output_probs[i] > np.quantile(model_output_probs[max(0,i-3):i+1], threshold) + threshold,
-    # "probability_windowed_moving_kurtosis": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.kurtosis(model_output_probs[max(0,i-3):i+1]) > threshold,
-    # "probability_windowed_moving_skewness": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.skew(model_output_probs[max(0,i-3):i+1]) > threshold,
-    # "probability_windowed_moving_entropy": lambda model_output_probs, context_given_model_output_probs, i, threshold: -np.sum(model_output_probs[max(0,i-3):i+1] * np.log(model_output_probs[max(0,i-3):i+1] + 1e-8)) > threshold,
-    # "probability_windowed_moving_cosine_similarity": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.dot(model_output_probs[max(0,i-3):i+1], context_given_model_output_probs[max(0,i-3):i+1]) / (np.linalg.norm(model_output_probs[max(0,i-3):i+1]) * np.linalg.norm(context_given_model_output_probs[max(0,i-3):i+1])) > threshold,
-    # "probability_windowed_moving_jensen_shannon_divergence": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.spatial.distance.jensenshannon(model_output_probs[max(0,i-3):i+1], context_given_model_output_probs[max(0,i-3):i+1]) > threshold,
-    # "probability_windowed_moving_average_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.mean(model_output_probs[max(0,i-3):i+1]) < np.mean(model_output_probs[max(0,i-4):i]) - threshold,
-    # "probability_windowed_moving_variance": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.var(model_output_probs[max(0,i-3):i+1]) > threshold,
-    "context_probability_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (context_given_model_output_probs[i] / (model_output_probs[i] + 1e-8)) >= threshold,
-    "probability_log_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.log(model_output_probs[i] + 1e-8) - np.log(context_given_model_output_probs[i] + 1e-8)) >= threshold,
-    "context_probability_log_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.log(context_given_model_output_probs[i] + 1e-8) - np.log(model_output_probs[i] + 1e-8)) >= threshold,
-    "probability_exponential_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.exp(model_output_probs[i]) - np.exp(context_given_model_output_probs[i])) >= threshold,
-    "context_probability_exponential_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.exp(context_given_model_output_probs[i]) - np.exp(model_output_probs[i])) >= threshold,
-    "probability_squared_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - context_given_model_output_probs[i])**2 >= threshold,
-    # "probability_moving_median_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.median(model_output_probs[max(0, i-4):i+1]) < np.median(model_output_probs[max(0, i-5):i]) - threshold if i > 4 else False,
-    # "probability_relative_variance": lambda model_output_probs, context_given_model_output_probs, i, threshold: (np.var(model_output_probs[max(0, i-3):i+2]) / (np.var(context_given_model_output_probs[max(0, i-3):i+2]) + 1e-8)) < threshold,
-    # "probability_peak_to_peak_diff": lambda model_output_probs, context_given_model_output_probs, i, threshold: (np.max(model_output_probs[max(0, i-2):i+3]) - np.min(model_output_probs[max(0, i-2):i+3])) > threshold,
-    # "probability_trend_decrease": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.polyfit(range(max(0, i-4), i+1), model_output_probs[max(0, i-4):i+1], 1)[0] < -threshold,
-    # "probability_trend_increase": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.polyfit(range(max(0, i-4), i+1), model_output_probs[max(0, i-4):i+1], 1)[0] > threshold,
-    # "probability_top_k_ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] / np.sum(model_output_probs[max(0,i-10):i+1])) < threshold,
-    "probability_decay_rate": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] / (i+1)) < threshold,
-    "entropy_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(scipy.stats.entropy(model_output_probs) - scipy.stats.entropy(context_given_model_output_probs)) > threshold,
-    "cross_correlation_peak_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.max(np.correlate(model_output_probs, context_given_model_output_probs, mode='full')) < threshold,
-    "earth_mover_distance": lambda model_output_probs, context_given_model_output_probs, i, threshold: scipy.stats.wasserstein_distance(model_output_probs, context_given_model_output_probs) > threshold,
-    "maximum_absolute_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.max(np.abs(np.array(model_output_probs) - np.array(context_given_model_output_probs))) > threshold,
-    "signal_energy_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: abs(np.sum(np.square(model_output_probs)) - np.sum(np.square(context_given_model_output_probs))) > threshold,
-    # "probability_derivative_crossing": lambda model_output_probs, context_given_model_output_probs, i, threshold: (model_output_probs[i] - model_output_probs[i-1]) * (context_given_model_output_probs[i] - context_given_model_output_probs[i-1]) < 0 if i > 0 else False,
-    # "spectral_density_difference": lambda model_output_probs, context_given_model_output_probs, i, threshold: np.sum(np.abs(np.fft.fft(model_output_probs[max(0,i-5):i+6]) - np.fft.fft(context_given_model_output_probs[max(0,i-5):i+6]))) > threshold,
-}
-
-
 def softmax(logits):
     exp_logits = np.exp(logits - np.max(logits))
     return exp_logits / exp_logits.sum(axis=-1, keepdims=True)
 
+def sigmoid(z):
+    return 1/(1 + np.exp(-z))
 
-def _get_token_logit(
+
+HALLUCINATION_CONDITIONS = {
+    "Context_Sensitivity_Ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (np.log(context_given_model_output_probs[i]) / (np.log(model_output_probs[i]) + 1e-8)) >= threshold,
+}
+
+
+def _get_token_logit_and_prob(
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     input_text: str,
     target_token_id: int
-) -> float:
+) -> Tuple[float, float]:
     # 입력 텍스트 토큰화
     model_inputs = tokenizer([input_text], return_tensors="pt").to(args.device)
 
@@ -199,19 +48,38 @@ def _get_token_logit(
     with torch.no_grad():
         outputs = model(**model_inputs)
         logits = outputs.logits[0, -1]
-
+    
+    # 토큰 확률 계산
     logit = logits[target_token_id].item()
-    return logit
+    prob = softmax(logits.float().cpu().numpy())[target_token_id]
+    return logit, prob
 
 
 def _get_tokens_ids_and_offsets_mapping(
     tokenizer,
     model_output_text,
 ):
-    encoding = tokenizer(model_output_text, return_offsets_mapping=True, add_special_tokens=True)
-    model_output_token_ids = encoding.input_ids
+    try:
+        encoding = tokenizer(model_output_text, return_offsets_mapping=True, add_special_tokens=True)
+        model_output_token_ids = encoding.input_ids
+        return model_output_token_ids, encoding.offset_mapping
+    except NotImplementedError:
+        def _generate_offset_mapping_manually(text, tokenizer):
+            tokens = tokenizer.tokenize(text)
+            offset_mapping = []
+            start = 0
+            for token in tokens:
+                token = token.replace("▁", " ")
+                start = text.find(token, start)
+                end = start + len(token)
+                offset_mapping.append((start, end))
+                start = end
+            return offset_mapping
+        encoding = tokenizer(model_output_text, add_special_tokens=True)
+        model_output_token_ids = encoding.input_ids
+        offset_mapping = _generate_offset_mapping_manually(model_output_text, tokenizer)
+        return model_output_token_ids, offset_mapping
 
-    return model_output_token_ids, encoding.offset_mapping
 
 
 def compute_output_probs(
@@ -222,27 +90,21 @@ def compute_output_probs(
     return_logits: bool = False
 ):
     model_output_logits = []
+    model_output_probs = []
     current_model_input = model_input_text
     for target_token_id in model_output_token_ids:
-        target_token_logit = _get_token_logit(model, tokenizer, current_model_input, target_token_id)
+        target_token_logit, target_token_prob = _get_token_logit_and_prob(model, tokenizer, current_model_input, target_token_id)
         model_output_logits.append(target_token_logit)
+        model_output_probs.append(target_token_prob)
         current_model_input += tokenizer.decode(target_token_id)
     # print("model_output_logits", model_output_logits) # [-5.5669536591,-11.90533638,-13.0743436813,-9.9514026642,-8.8359375,-5.2216725349,-8.8481779099,-9.2853775024,-7.6449022293,-8.7612609863,-9.1256427765,-5.7042989731,-5.7393956184,-8.409078598,-10.6083183289,-11.707988739,-5.3747014999,-6.5602250099,-5.1362328529,-5.7765812874,-8.4669551849,-8.3430461884,-8.7018699646]
-    model_output_probs = softmax(model_output_logits)
-    # model_output_probs
-    """
-    array([1.16355852e-01, 2.05619164e-04, 6.38807739e-05, 1.45092920e-03,
-            4.42676620e-03, 1.64339483e-01, 4.37291105e-03, 2.82421186e-03,
-            1.45662122e-02, 4.76999785e-03, 3.31336425e-03, 1.01423809e-01,
-            9.79259149e-02, 6.78373776e-03, 7.52231251e-04, 2.50478573e-04,
-            1.41020510e-01, 4.30939162e-02, 1.78997885e-01, 9.43513475e-02,
-            6.40226386e-03, 7.24680478e-03, 5.06187453e-03])
-    """
-
+    # print("model_output_probs", model_output_probs) # [0.003978,0.000002,0.000000,0.000073,0.000335,0.004999,0.000332,0.000197,0.000525,0.000359,0.000221,0.003366,0.003285,0.000486,0.000028,0.000008,0.003617,0.001543,0.004366,0.002982,0.000464,0.000527,0.000407]
     if return_logits:
         return model_output_probs, model_output_logits
     else:
         return model_output_probs
+
+
 
 
 def main():
@@ -259,6 +121,11 @@ def main():
     with open(args.yaml_filepath, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
+    if config["REFIND"]["input_prompt_template"] == "REFIND_PROMPT_TEMPLATE_WO_QUESTION":
+        from prompt import REFIND_PROMPT_TEMPLATE_WO_QUESTION as INPUT_PROMPT_TEMPLATE
+    elif config["REFIND"]["input_prompt_template"] == "REFIND_PROMPT_TEMPLATE":
+        from prompt import REFIND_PROMPT_TEMPLATE as INPUT_PROMPT_TEMPLATE
+
     threshold_list = config["REFIND"]["threshold_list"]
     total_predictions = {condition: {threshold: [] for threshold in threshold_list} for condition in HALLUCINATION_CONDITIONS.keys()}
     for idx in range(len(model_id_list)):
@@ -271,10 +138,54 @@ def main():
             model_id = model_id.replace("\/", "/")
             if model_id == "TheBloke/Mistral-7B-Instruct-v0.2-GGUF":
                 model_basename = "mistral-7b-instruct-v0.2.Q6_K.gguf"
+                tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
+                model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
             elif model_id == "TheBloke/SauerkrautLM-7B-v1-GGUF":
                 model_basename = "sauerkrautlm-7b-v1.Q4_K_M.gguf"
-            tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
-            model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+                tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
+                model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+            elif model_id == "AI-Sweden-Models/gpt-sw3-6.7b-v2-instruct-gguf":
+                try:
+                    model_basename = "gpt-sw3-6.7b-v2-instruct-Q5_K_M.gguf"
+                    tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
+                    model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+                except ValueError as e:
+                    print(e)
+                    print(f"Failed to load model {model_id} with GGUF file. Trying to load without GGUF file.")
+                    model_basename = "gpt-sw3-6.7b-v2-instruct-Q4_K_M.gguf"
+                    tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
+                    model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+        elif model_id.replace("\/", "/") == "LumiOpen/Poro-34B-chat":
+            model_id = model_id.replace("\/", "/")
+            tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                device_map='auto',
+                torch_dtype=torch.bfloat16,
+            )
+        elif model_id.replace("\/", "/") == "LumiOpen/Viking-33B":
+            model_id = model_id.replace("\/", "/")
+            tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                device_map='auto',
+                load_in_8bit=True
+            )
+        elif model_id.replace("\/", "/") == "rstless-research/DanteLLM-7B-Instruct-Italian-v0.1":
+            model_id = model_id.replace("\/", "/")
+            tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2")
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.padding_side = "right"
+
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id, device_map="auto", load_in_8bit=True #torch_dtype=torch.bfloat16
+            )
+        elif model_id.replace("\/", "/") in ["sapienzanlp/modello-italia-9b", "meta-llama/Meta-Llama-3.1-8B-Instruct", "Qwen/Qwen2-7B-Instruct"]:
+            model_id = model_id.replace("\/", "/")
+            tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id, device_map="auto", torch_dtype=torch.bfloat16
+            )
         else:
             tokenizer = AutoTokenizer.from_pretrained(model_id.replace("\/", "/"), trust_remote_code=True)
             model = AutoModelForCausalLM.from_pretrained(model_id.replace("\/", "/"), trust_remote_code=True).to(args.device)
@@ -312,7 +223,7 @@ def main():
             model_output_text = record['model_output_text'] # "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
             model_output_token_ids, offsets_mapping = _get_tokens_ids_and_offsets_mapping(tokenizer, model_output_text)
             assert offsets_mapping[-1][1] == len(model_output_text), "Offsets mapping and model output text mismatch!"
-            assert len(model_output_token_ids) == len(offsets_mapping), "Token IDs and offsets mapping mismatch!"
+            assert len(model_output_token_ids) == len(offsets_mapping), f"Token IDs and offsets mapping mismatch! {len(model_output_token_ids)} vs {len(offsets_mapping)}"
             model_output_probs, model_output_logits = compute_output_probs(model, tokenizer, model_input_text, model_output_token_ids, return_logits=True)
             assert len(model_output_probs) == len(model_output_logits), "Logits and output probabilities mismatch!"
             assert len(offsets_mapping) == len(model_output_probs), "Offsets mapping and output probabilities mismatch!"
@@ -340,6 +251,9 @@ def main():
             model_output_probs = model_output_probs[start_idx_of_processed_offsets:]
             context_given_model_output_logits = context_given_model_output_logits[start_idx_of_processed_offsets:]
             context_given_model_output_probs = context_given_model_output_probs[start_idx_of_processed_offsets:]
+
+            model_output_probs = [float(prob) for prob in model_output_probs]
+            context_given_model_output_probs = [float(prob) for prob in context_given_model_output_probs]
             
             for condition in HALLUCINATION_CONDITIONS.keys():
                 for threshold in threshold_list:
@@ -349,20 +263,31 @@ def main():
                     for i, span in zip(range(len(model_output_token_ids)), offsets_mapping):
                         start_span, end_span = span
 
-                        # Hallucination Detection Rule
-                        if HALLUCINATION_CONDITIONS[condition](model_output_probs, context_given_model_output_probs, i, threshold):
-                            if args.use_debug:
-                                print(f"Hallucination Detected!")
+                        try:
+                            # Hallucination Detection Rule
+                            if model_output_probs[i] == 0 and context_given_model_output_probs[i] == 0:
+                                continue
+                            elif HALLUCINATION_CONDITIONS[condition](model_output_probs, context_given_model_output_probs, i, threshold):
+                                if args.use_debug:
+                                    print(f"Hallucination Detected!")
 
-                            confidence = 1 - model_output_probs[i]
-                            hallucination_span_ranges.append([start_span, end_span])
-                            hallucination_span_ranges_with_probs.append({
-                                'start': start_span,
-                                'end': end_span,
-                                'prob': confidence
-                            })
-                        else:
-                            pass
+                                if condition == "Context_Sensitivity_Ratio":
+                                    confidence = sigmoid(np.log(context_given_model_output_probs[i]) / (np.log(model_output_probs[i]) + 1e-8))
+                                else:
+                                    confidence = context_given_model_output_probs[i]
+                                hallucination_span_ranges.append([start_span, end_span])
+                                hallucination_span_ranges_with_probs.append({
+                                    'start': start_span,
+                                    'end': end_span,
+                                    'prob': confidence
+                                })
+                            else:
+                                continue
+                        except ZeroDivisionError as e:
+                            print(f"ZeroDivisionError: {e}")
+                            print(f"model_output_probs[i]: {model_output_probs[i]}")
+                            print(f"context_given_model_output_probs[i]: {context_given_model_output_probs[i]}")
+                            exit()
 
                     # Post-processing: merge adjacent spans
                     if len(hallucination_span_ranges) > 0:
@@ -374,16 +299,16 @@ def main():
                                 merged_hallucination_span_ranges.append(span)
                         hallucination_span_ranges = merged_hallucination_span_ranges
 
-                    if len(hallucination_span_ranges_with_probs) > 0:
-                        merged_hallucination_span_ranges_with_probs = [hallucination_span_ranges_with_probs[0]]
-                        for span in hallucination_span_ranges_with_probs[1:]:
-                            if span['start'] == merged_hallucination_span_ranges_with_probs[-1]['end']:
-                                merged_hallucination_span_ranges_with_probs[-1]['end'] = span['end']
-                                # merge probabilities
-                                merged_hallucination_span_ranges_with_probs[-1]['prob'] = max(merged_hallucination_span_ranges_with_probs[-1]['prob'], span['prob'])
-                            else:
-                                merged_hallucination_span_ranges_with_probs.append(span)
-                        hallucination_span_ranges_with_probs = merged_hallucination_span_ranges_with_probs
+                    # if len(hallucination_span_ranges_with_probs) > 0:
+                    #     merged_hallucination_span_ranges_with_probs = [hallucination_span_ranges_with_probs[0]]
+                    #     for span in hallucination_span_ranges_with_probs[1:]:
+                    #         if span['start'] == merged_hallucination_span_ranges_with_probs[-1]['end']:
+                    #             merged_hallucination_span_ranges_with_probs[-1]['end'] = span['end']
+                    #             # merge probabilities
+                    #             merged_hallucination_span_ranges_with_probs[-1]['prob'] = max(merged_hallucination_span_ranges_with_probs[-1]['prob'], span['prob'])
+                    #         else:
+                    #             merged_hallucination_span_ranges_with_probs.append(span)
+                    #     hallucination_span_ranges_with_probs = merged_hallucination_span_ranges_with_probs
 
                     total_predictions[condition][threshold].append({
                         'hallucination_condition': condition,
@@ -397,15 +322,20 @@ def main():
                         'reference': reference_passages,
                         'model_input_with_context': model_input_with_context,
                         'model_id': model_id,
+                        'model_output_logits': model_output_logits,
+                        'model_output_probs': model_output_probs,
+                        'context_given_model_output_logits': context_given_model_output_logits,
+                        'context_given_model_output_probs': context_given_model_output_probs
                     })
 
         del model
         del tokenizer
+        del model_output_probs, model_output_logits, context_given_model_output_probs, context_given_model_output_logits
 
     for condition in HALLUCINATION_CONDITIONS.keys():
         for threshold in threshold_list:
             predictions = total_predictions[condition][threshold]
-            output_file_directory = os.path.join(args.output_directory, os.path.basename(args.yaml_filepath.replace(".yaml", "")))
+            output_file_directory = os.path.join(args.output_directory, f'{os.path.basename(args.yaml_filepath.replace(".yaml", ""))}')
             if not os.path.exists(output_file_directory):
                 os.makedirs(output_file_directory)
             output_filepath = os.path.join(output_file_directory, f"{predictions[0]['lang'].lower()}_REFIND_{condition}_{threshold}.jsonl")

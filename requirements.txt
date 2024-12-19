@@ -1,9 +1,9 @@
 pandas
-scipy<1.13.0
+scipy
 # scikit-learn
-numpy
+numpy<2,>=1.22.4
 # transformers
-vllm # for FAVA
+vllm==0.6.4 # for FAVA
 datasets<3.0.0
 seqeval
 
@@ -13,6 +13,7 @@ seqeval
 gguf>=0.10.0
 sentencepiece
 accelerate
+bitsandbytes
 
 langchain
 langchain_community
@@ -22,3 +23,8 @@ wikiextractor==0.1
 rank_bm25
 
 # conda install -c pytorch -c nvidia faiss-gpu=1.8.0
+
+nltk 
+pyarabic # for Arabic language
+jieba # for Chinese language
+indic-nlp-library # for Indian languages
