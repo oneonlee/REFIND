@@ -67,7 +67,11 @@ if __name__ == "__main__":
     p.add_argument("--score_file", type=str, default=None)
     p.add_argument("--bootstrap", type=int, default=0)
     p.add_argument("--all_or_nothing", action="store_true")
+    p.add_argument("--seed", type=int, default=42)
     a = p.parse_args()
+
+    random.seed(a.seed)
+    np.random.seed(a.seed)
 
     if a.all_or_nothing:
         prob_dict = get_prob_flat(a.ref_file)
