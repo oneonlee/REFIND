@@ -20,7 +20,31 @@ class Retriever:
         with open(yaml_config_path) as f:
             self.config = yaml.load(f, Loader=yaml.FullLoader)
 
-        cache_directory = os.path.dirname(self.config["HybridRetriever"]["input_file_path"])
+        language = self.config["Retriever"]["language"]
+        if language.upper() == "EN":
+            from retriever.preprocess_func import EN_preprocessing_func as preprocessing_func
+        elif language.upper() == "AR":
+            from retriever.preprocess_func import AR_preprocessing_func as preprocessing_func
+        elif language.upper() == "DE":
+            from retriever.preprocess_func import DE_preprocessing_func as preprocessing_func
+        elif language.upper() == "ES":
+            from retriever.preprocess_func import ES_preprocessing_func as preprocessing_func
+        elif language.upper() == "FI":
+            from retriever.preprocess_func import FI_preprocessing_func as preprocessing_func
+        elif language.upper() == "FR":
+            from retriever.preprocess_func import FR_preprocessing_func as preprocessing_func
+        elif language.upper() == "IT":
+            from retriever.preprocess_func import IT_preprocessing_func as preprocessing_func
+        elif language.upper() == "HI":
+            from retriever.preprocess_func import HI_preprocessing_func as preprocessing_func
+        elif language.upper() == "SV":
+            from retriever.preprocess_func import SV_preprocessing_func as preprocessing_func
+        elif language.upper() == "ZH":
+            from retriever.preprocess_func import ZH_preprocessing_func as preprocessing_func
+        else:
+            raise ValueError(f"Unsupported language: {language}")
+
+        cache_directory = os.path.dirname(self.config["Retriever"]["input_file_path"])
         cache_file_name = f'split_docs_cache-{os.path.basename(self.config["Retriever"]["input_file_path"])}-chunk_size_{self.config["Retriever"]["parameters"]["retrieval_chunk_size"]}-chunk_overlap_{self.config["Retriever"]["parameters"]["retrieval_chunk_overlap"]}.pkl'
         cache_file_path = os.path.join(cache_directory, cache_file_name)
         if use_cache and os.path.exists(cache_file_path):
@@ -56,7 +80,7 @@ class Retriever:
                 print("Retriever: split_docs Saved")
 
         self.retrieval_top_k = self.config["Retriever"]["parameters"]["retrieval_top_k"]
-        self.langchain_retriever = BM25Retriever.from_documents(split_docs, k=self.retrieval_top_k)
+        self.langchain_retriever = BM25Retriever.from_documents(split_docs, k=self.retrieval_top_k, preprocess_func=preprocessing_func)
         del split_docs
         print("Retriever: Initialized")
 
@@ -81,6 +105,30 @@ class HybridRetriever(Retriever):
     ):
         with open(yaml_config_path) as f:
             self.config = yaml.load(f, Loader=yaml.FullLoader)
+
+        language = self.config["Retriever"]["language"]
+        if language.upper() == "EN":
+            from retriever.preprocess_func import EN_preprocessing_func as preprocessing_func
+        elif language.upper() == "AR":
+            from retriever.preprocess_func import AR_preprocessing_func as preprocessing_func
+        elif language.upper() == "DE":
+            from retriever.preprocess_func import DE_preprocessing_func as preprocessing_func
+        elif language.upper() == "ES":
+            from retriever.preprocess_func import ES_preprocessing_func as preprocessing_func
+        elif language.upper() == "FI":
+            from retriever.preprocess_func import FI_preprocessing_func as preprocessing_func
+        elif language.upper() == "FR":
+            from retriever.preprocess_func import FR_preprocessing_func as preprocessing_func
+        elif language.upper() == "IT":
+            from retriever.preprocess_func import IT_preprocessing_func as preprocessing_func
+        elif language.upper() == "HI":
+            from retriever.preprocess_func import HI_preprocessing_func as preprocessing_func
+        elif language.upper() == "SV":
+            from retriever.preprocess_func import SV_preprocessing_func as preprocessing_func
+        elif language.upper() == "ZH":
+            from retriever.preprocess_func import ZH_preprocessing_func as preprocessing_func
+        else:
+            raise ValueError(f"Unsupported language: {language}")
 
         print("HybridRetriever: Create a HuggingFaceEmbeddings object")
         self.hf_embeddings = HuggingFaceEmbeddings(
@@ -126,7 +174,7 @@ class HybridRetriever(Retriever):
 
         self.retrieval_top_k = self.config["HybridRetriever"]["parameters"]["retrieval_top_k"]
         self.reranking_top_k = self.config["HybridRetriever"]["parameters"]["reranking_top_k"]
-        self.langchain_retriever = BM25Retriever.from_documents(split_docs, k=self.retrieval_top_k)
+        self.langchain_retriever = BM25Retriever.from_documents(split_docs, k=self.retrieval_top_k, preprocess_func=preprocessing_func)
         del split_docs
         print("HybridRetriever: Initialized")
 
