@@ -1,7 +1,7 @@
 REFIND:
     retriever: HybridRetriever
     input_prompt_template: REFIND_PROMPT_TEMPLATE
-    threshold_list: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.01, 0.05, 0.001, 0.005, 0.0001, 0.0005, 0.00001, 0.00005, 0.000001, 0.000005]
+    threshold_list: [0.1, 0.2, 0.3, 0.4]
 FAVA:
     retriever: HybridRetriever
 
