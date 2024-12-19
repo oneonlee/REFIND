@@ -7,6 +7,6 @@ for lang in ar de en es fi fr it zh; do
 
     python evaluation.py \
         --valid_filepath $valid_filepath \
-        --pred_directory "$pred_directory/$config_name" \
+        --pred_directory "$pred_directory" \
         --score_directory $score_directory
 done
