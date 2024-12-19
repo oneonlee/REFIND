@@ -171,7 +171,6 @@ def test_model(test_lang, model_path, data_path, pred_path):
             }
         )
 
-    
     with open(os.path.join(pred_path, f"{test_lang}-hard_labels.json"), "w") as f:
         json.dump(hard_labels_all, f)
     with open(os.path.path.join(pred_path, f"{test_lang}-soft_labels.json"), "w") as f:

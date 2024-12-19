@@ -22,4 +22,3 @@ REFIND_PROMPT_TEMPLATE = (
     "{question}\n"
     "### Answer\n"
 )
-

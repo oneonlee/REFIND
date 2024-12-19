@@ -15,23 +15,29 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 p = ap.ArgumentParser()
-p.add_argument('--yaml_filepath', type=str, default="en_config.yaml")
-p.add_argument('--input_filepath', type=str)
-p.add_argument('--output_directory', type=str)
-p.add_argument('--device', type=str, default='cuda')
-p.add_argument('--use_debug', action='store_true')
+p.add_argument("--yaml_filepath", type=str, default="en_config.yaml")
+p.add_argument("--input_filepath", type=str)
+p.add_argument("--output_directory", type=str)
+p.add_argument("--device", type=str, default="cuda")
+p.add_argument("--use_debug", action="store_true")
 args = p.parse_args()
+
 
 def softmax(logits):
     exp_logits = np.exp(logits - np.max(logits))
     return exp_logits / exp_logits.sum(axis=-1, keepdims=True)
 
+
 def sigmoid(z):
-    return 1/(1 + np.exp(-z))
+    return 1 / (1 + np.exp(-z))
 
 
 HALLUCINATION_CONDITIONS = {
-    "Context_Sensitivity_Ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (np.log(context_given_model_output_probs[i]) / (np.log(model_output_probs[i]) + 1e-8)) >= threshold,
+    "Context_Sensitivity_Ratio": lambda model_output_probs, context_given_model_output_probs, i, threshold: (
+        np.log(context_given_model_output_probs[i])
+        / (np.log(model_output_probs[i]) + 1e-8)
+    )
+    >= threshold,
 }
 
 
@@ -39,7 +45,7 @@ def _get_token_logit_and_prob(
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     input_text: str,
-    target_token_id: int
+    target_token_id: int,
 ) -> Tuple[float, float]:
     # 입력 텍스트 토큰화
     model_inputs = tokenizer([input_text], return_tensors="pt").to(args.device)
@@ -48,7 +54,7 @@ def _get_token_logit_and_prob(
     with torch.no_grad():
         outputs = model(**model_inputs)
         logits = outputs.logits[0, -1]
-    
+
     # 토큰 확률 계산
     logit = logits[target_token_id].item()
     prob = softmax(logits.float().cpu().numpy())[target_token_id]
@@ -60,10 +66,13 @@ def _get_tokens_ids_and_offsets_mapping(
     model_output_text,
 ):
     try:
-        encoding = tokenizer(model_output_text, return_offsets_mapping=True, add_special_tokens=True)
+        encoding = tokenizer(
+            model_output_text, return_offsets_mapping=True, add_special_tokens=True
+        )
         model_output_token_ids = encoding.input_ids
         return model_output_token_ids, encoding.offset_mapping
     except NotImplementedError:
+
         def _generate_offset_mapping_manually(text, tokenizer):
             tokens = tokenizer.tokenize(text)
             offset_mapping = []
@@ -75,11 +84,11 @@ def _get_tokens_ids_and_offsets_mapping(
                 offset_mapping.append((start, end))
                 start = end
             return offset_mapping
+
         encoding = tokenizer(model_output_text, add_special_tokens=True)
         model_output_token_ids = encoding.input_ids
         offset_mapping = _generate_offset_mapping_manually(model_output_text, tokenizer)
         return model_output_token_ids, offset_mapping
-
 
 
 def compute_output_probs(
@@ -87,13 +96,15 @@ def compute_output_probs(
     tokenizer: AutoTokenizer,
     model_input_text: str,
     model_output_token_ids: List[int],
-    return_logits: bool = False
+    return_logits: bool = False,
 ):
     model_output_logits = []
     model_output_probs = []
     current_model_input = model_input_text
     for target_token_id in model_output_token_ids:
-        target_token_logit, target_token_prob = _get_token_logit_and_prob(model, tokenizer, current_model_input, target_token_id)
+        target_token_logit, target_token_prob = _get_token_logit_and_prob(
+            model, tokenizer, current_model_input, target_token_id
+        )
         model_output_logits.append(target_token_logit)
         model_output_probs.append(target_token_prob)
         current_model_input += tokenizer.decode(target_token_id)
@@ -105,29 +116,33 @@ def compute_output_probs(
         return model_output_probs
 
 
-
-
 def main():
     records = load_jsonl_file(args.input_filepath)
     if args.use_debug:
         print(records)
 
     # model_id가 같은 것들끼리 record를 구성
-    model_id_list = list(set([record['model_id'] for record in records]))
+    model_id_list = list(set([record["model_id"] for record in records]))
     model_wise_records = {model_id: [] for model_id in model_id_list}
     for record in records:
-        model_wise_records[record['model_id']].append(record)
+        model_wise_records[record["model_id"]].append(record)
 
-    with open(args.yaml_filepath, 'r') as f:
+    with open(args.yaml_filepath, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
-    if config["REFIND"]["input_prompt_template"] == "REFIND_PROMPT_TEMPLATE_WO_QUESTION":
+    if (
+        config["REFIND"]["input_prompt_template"]
+        == "REFIND_PROMPT_TEMPLATE_WO_QUESTION"
+    ):
         from prompt import REFIND_PROMPT_TEMPLATE_WO_QUESTION as INPUT_PROMPT_TEMPLATE
     elif config["REFIND"]["input_prompt_template"] == "REFIND_PROMPT_TEMPLATE":
         from prompt import REFIND_PROMPT_TEMPLATE as INPUT_PROMPT_TEMPLATE
 
     threshold_list = config["REFIND"]["threshold_list"]
-    total_predictions = {condition: {threshold: [] for threshold in threshold_list} for condition in HALLUCINATION_CONDITIONS.keys()}
+    total_predictions = {
+        condition: {threshold: [] for threshold in threshold_list}
+        for condition in HALLUCINATION_CONDITIONS.keys()
+    }
     for idx in range(len(model_id_list)):
         # model_id 별로 hallucination detection 수행
         model_id = model_id_list[idx]
@@ -138,59 +153,90 @@ def main():
             model_id = model_id.replace("\/", "/")
             if model_id == "TheBloke/Mistral-7B-Instruct-v0.2-GGUF":
                 model_basename = "mistral-7b-instruct-v0.2.Q6_K.gguf"
-                tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
-                model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_id, gguf_file=model_basename
+                )
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id, gguf_file=model_basename
+                ).to(args.device)
             elif model_id == "TheBloke/SauerkrautLM-7B-v1-GGUF":
                 model_basename = "sauerkrautlm-7b-v1.Q4_K_M.gguf"
-                tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
-                model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_id, gguf_file=model_basename
+                )
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id, gguf_file=model_basename
+                ).to(args.device)
             elif model_id == "AI-Sweden-Models/gpt-sw3-6.7b-v2-instruct-gguf":
                 try:
                     model_basename = "gpt-sw3-6.7b-v2-instruct-Q5_K_M.gguf"
-                    tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
-                    model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        model_id, gguf_file=model_basename
+                    )
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_id, gguf_file=model_basename
+                    ).to(args.device)
                 except ValueError as e:
                     print(e)
-                    print(f"Failed to load model {model_id} with GGUF file. Trying to load without GGUF file.")
+                    print(
+                        f"Failed to load model {model_id} with GGUF file. Trying to load without GGUF file."
+                    )
                     model_basename = "gpt-sw3-6.7b-v2-instruct-Q4_K_M.gguf"
-                    tokenizer = AutoTokenizer.from_pretrained(model_id, gguf_file=model_basename)
-                    model = AutoModelForCausalLM.from_pretrained(model_id, gguf_file=model_basename).to(args.device)
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        model_id, gguf_file=model_basename
+                    )
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_id, gguf_file=model_basename
+                    ).to(args.device)
         elif model_id.replace("\/", "/") == "LumiOpen/Poro-34B-chat":
             model_id = model_id.replace("\/", "/")
             tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
-                device_map='auto',
+                device_map="auto",
                 torch_dtype=torch.bfloat16,
             )
         elif model_id.replace("\/", "/") == "LumiOpen/Viking-33B":
             model_id = model_id.replace("\/", "/")
             tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
             model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                device_map='auto',
-                load_in_8bit=True
+                model_id, device_map="auto", load_in_8bit=True
             )
-        elif model_id.replace("\/", "/") == "rstless-research/DanteLLM-7B-Instruct-Italian-v0.1":
+        elif (
+            model_id.replace("\/", "/")
+            == "rstless-research/DanteLLM-7B-Instruct-Italian-v0.1"
+        ):
             model_id = model_id.replace("\/", "/")
-            tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2")
+            tokenizer = AutoTokenizer.from_pretrained(
+                "mistralai/Mistral-7B-Instruct-v0.2"
+            )
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.padding_side = "right"
 
             model = AutoModelForCausalLM.from_pretrained(
-                model_id, device_map="auto", load_in_8bit=True #torch_dtype=torch.bfloat16
+                model_id,
+                device_map="auto",
+                load_in_8bit=True,  # torch_dtype=torch.bfloat16
             )
-        elif model_id.replace("\/", "/") in ["sapienzanlp/modello-italia-9b", "meta-llama/Meta-Llama-3.1-8B-Instruct", "Qwen/Qwen2-7B-Instruct"]:
+        elif model_id.replace("\/", "/") in [
+            "sapienzanlp/modello-italia-9b",
+            "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "Qwen/Qwen2-7B-Instruct",
+        ]:
             model_id = model_id.replace("\/", "/")
             tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
             model = AutoModelForCausalLM.from_pretrained(
                 model_id, device_map="auto", torch_dtype=torch.bfloat16
             )
         else:
-            tokenizer = AutoTokenizer.from_pretrained(model_id.replace("\/", "/"), trust_remote_code=True)
-            model = AutoModelForCausalLM.from_pretrained(model_id.replace("\/", "/"), trust_remote_code=True).to(args.device)
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id.replace("\/", "/"), trust_remote_code=True
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id.replace("\/", "/"), trust_remote_code=True
+            ).to(args.device)
 
-        for record in tqdm(records, desc='Processing records'):
+        for record in tqdm(records, desc="Processing records"):
             # example of record:
             """
             {
@@ -217,27 +263,67 @@ def main():
                 ]
             }
             """
-            assert record['model_id'] == model_id, f"Model ID mismatch: {record['model_id']} vs {model_id}"
+            assert (
+                record["model_id"] == model_id
+            ), f"Model ID mismatch: {record['model_id']} vs {model_id}"
 
-            model_input_text = record['model_input'] # "What did Petra van Staveren win a gold medal for?"
-            model_output_text = record['model_output_text'] # "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
-            model_output_token_ids, offsets_mapping = _get_tokens_ids_and_offsets_mapping(tokenizer, model_output_text)
-            assert offsets_mapping[-1][1] == len(model_output_text), "Offsets mapping and model output text mismatch!"
-            assert len(model_output_token_ids) == len(offsets_mapping), f"Token IDs and offsets mapping mismatch! {len(model_output_token_ids)} vs {len(offsets_mapping)}"
-            model_output_probs, model_output_logits = compute_output_probs(model, tokenizer, model_input_text, model_output_token_ids, return_logits=True)
-            assert len(model_output_probs) == len(model_output_logits), "Logits and output probabilities mismatch!"
-            assert len(offsets_mapping) == len(model_output_probs), "Offsets mapping and output probabilities mismatch!"
+            model_input_text = record[
+                "model_input"
+            ]  # "What did Petra van Staveren win a gold medal for?"
+            model_output_text = record[
+                "model_output_text"
+            ]  # "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
+            model_output_token_ids, offsets_mapping = (
+                _get_tokens_ids_and_offsets_mapping(tokenizer, model_output_text)
+            )
+            assert offsets_mapping[-1][1] == len(
+                model_output_text
+            ), "Offsets mapping and model output text mismatch!"
+            assert len(model_output_token_ids) == len(
+                offsets_mapping
+            ), f"Token IDs and offsets mapping mismatch! {len(model_output_token_ids)} vs {len(offsets_mapping)}"
+            model_output_probs, model_output_logits = compute_output_probs(
+                model,
+                tokenizer,
+                model_input_text,
+                model_output_token_ids,
+                return_logits=True,
+            )
+            assert len(model_output_probs) == len(
+                model_output_logits
+            ), "Logits and output probabilities mismatch!"
+            assert len(offsets_mapping) == len(
+                model_output_probs
+            ), "Offsets mapping and output probabilities mismatch!"
 
             reference_passages = record["context"]
-            assert reference_passages is not None, "Reference passages are not provided!"
+            assert (
+                reference_passages is not None
+            ), "Reference passages are not provided!"
             if isinstance(reference_passages, list):
                 reference_passages = "\n".join(reference_passages)
 
-            model_input_with_context = INPUT_PROMPT_TEMPLATE.format(references=reference_passages, question=model_input_text)
-            context_given_model_output_probs, context_given_model_output_logits = compute_output_probs(model, tokenizer, model_input_with_context, model_output_token_ids, return_logits=True)
-            assert len(context_given_model_output_probs) == len(context_given_model_output_logits), "Logits and output probabilities mismatch!"
-            assert len(context_given_model_output_probs) == len(model_output_probs), "Model output probabilities with/without context mismatch!"
-            assert len(context_given_model_output_probs) == len(offsets_mapping), "Offsets mapping and output probabilities mismatch!"
+            model_input_with_context = INPUT_PROMPT_TEMPLATE.format(
+                references=reference_passages, question=model_input_text
+            )
+            context_given_model_output_probs, context_given_model_output_logits = (
+                compute_output_probs(
+                    model,
+                    tokenizer,
+                    model_input_with_context,
+                    model_output_token_ids,
+                    return_logits=True,
+                )
+            )
+            assert len(context_given_model_output_probs) == len(
+                context_given_model_output_logits
+            ), "Logits and output probabilities mismatch!"
+            assert len(context_given_model_output_probs) == len(
+                model_output_probs
+            ), "Model output probabilities with/without context mismatch!"
+            assert len(context_given_model_output_probs) == len(
+                offsets_mapping
+            ), "Offsets mapping and output probabilities mismatch!"
 
             # Post-processing logits, probabilities, and offsets
             start_idx_of_processed_offsets = 0
@@ -249,49 +335,74 @@ def main():
             offsets_mapping = offsets_mapping[start_idx_of_processed_offsets:]
             model_output_logits = model_output_logits[start_idx_of_processed_offsets:]
             model_output_probs = model_output_probs[start_idx_of_processed_offsets:]
-            context_given_model_output_logits = context_given_model_output_logits[start_idx_of_processed_offsets:]
-            context_given_model_output_probs = context_given_model_output_probs[start_idx_of_processed_offsets:]
+            context_given_model_output_logits = context_given_model_output_logits[
+                start_idx_of_processed_offsets:
+            ]
+            context_given_model_output_probs = context_given_model_output_probs[
+                start_idx_of_processed_offsets:
+            ]
 
             model_output_probs = [float(prob) for prob in model_output_probs]
-            context_given_model_output_probs = [float(prob) for prob in context_given_model_output_probs]
-            
+            context_given_model_output_probs = [
+                float(prob) for prob in context_given_model_output_probs
+            ]
+
             for condition in HALLUCINATION_CONDITIONS.keys():
                 for threshold in threshold_list:
                     hallucination_span_ranges = []
                     hallucination_span_ranges_with_probs = []
                     # for i, token in enumerate(offsets_mapping):
-                    for i, span in zip(range(len(model_output_token_ids)), offsets_mapping):
+                    for i, span in zip(
+                        range(len(model_output_token_ids)), offsets_mapping
+                    ):
                         start_span, end_span = span
 
                         try:
                             # Hallucination Detection Rule
-                            if model_output_probs[i] == 0 and context_given_model_output_probs[i] == 0:
+                            if (
+                                model_output_probs[i] == 0
+                                and context_given_model_output_probs[i] == 0
+                            ):
                                 continue
-                            elif HALLUCINATION_CONDITIONS[condition](model_output_probs, context_given_model_output_probs, i, threshold):
+                            elif HALLUCINATION_CONDITIONS[condition](
+                                model_output_probs,
+                                context_given_model_output_probs,
+                                i,
+                                threshold,
+                            ):
                                 if args.use_debug:
                                     print(f"Hallucination Detected!")
 
                                 if condition == "Context_Sensitivity_Ratio":
-                                    confidence = sigmoid(np.log(context_given_model_output_probs[i]) / (np.log(model_output_probs[i]) + 1e-8))
+                                    confidence = sigmoid(
+                                        np.log(context_given_model_output_probs[i])
+                                        / (np.log(model_output_probs[i]) + 1e-8)
+                                    )
                                 else:
                                     confidence = context_given_model_output_probs[i]
                                 hallucination_span_ranges.append([start_span, end_span])
-                                hallucination_span_ranges_with_probs.append({
-                                    'start': start_span,
-                                    'end': end_span,
-                                    'prob': confidence
-                                })
+                                hallucination_span_ranges_with_probs.append(
+                                    {
+                                        "start": start_span,
+                                        "end": end_span,
+                                        "prob": confidence,
+                                    }
+                                )
                             else:
                                 continue
                         except ZeroDivisionError as e:
                             print(f"ZeroDivisionError: {e}")
                             print(f"model_output_probs[i]: {model_output_probs[i]}")
-                            print(f"context_given_model_output_probs[i]: {context_given_model_output_probs[i]}")
+                            print(
+                                f"context_given_model_output_probs[i]: {context_given_model_output_probs[i]}"
+                            )
                             exit()
 
                     # Post-processing: merge adjacent spans
                     if len(hallucination_span_ranges) > 0:
-                        merged_hallucination_span_ranges = [hallucination_span_ranges[0]]
+                        merged_hallucination_span_ranges = [
+                            hallucination_span_ranges[0]
+                        ]
                         for span in hallucination_span_ranges[1:]:
                             if span[0] == merged_hallucination_span_ranges[-1][1]:
                                 merged_hallucination_span_ranges[-1][1] = span[1]
@@ -310,37 +421,54 @@ def main():
                     #             merged_hallucination_span_ranges_with_probs.append(span)
                     #     hallucination_span_ranges_with_probs = merged_hallucination_span_ranges_with_probs
 
-                    total_predictions[condition][threshold].append({
-                        'hallucination_condition': condition,
-                        'threshold': threshold,
-                        'id': record['id'], # e.g., "val-en-1"
-                        'lang': record['lang'], # e.g., "EN"
-                        'hard_labels': hallucination_span_ranges, # e.g., `[[6,10],[61,72]]`
-                        'soft_labels': hallucination_span_ranges_with_probs, # e.g., `"[{"start":1,"prob":0.9090909091,"end":6}]`
-                        'model_input': record['model_input'], # e.g., "What did Petra van Staveren win a gold medal for?"
-                        'model_output_text': record['model_output_text'], # e.g., "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
-                        'reference': reference_passages,
-                        'model_input_with_context': model_input_with_context,
-                        'model_id': model_id,
-                        'model_output_logits': model_output_logits,
-                        'model_output_probs': model_output_probs,
-                        'context_given_model_output_logits': context_given_model_output_logits,
-                        'context_given_model_output_probs': context_given_model_output_probs
-                    })
+                    total_predictions[condition][threshold].append(
+                        {
+                            "hallucination_condition": condition,
+                            "threshold": threshold,
+                            "id": record["id"],  # e.g., "val-en-1"
+                            "lang": record["lang"],  # e.g., "EN"
+                            "hard_labels": hallucination_span_ranges,  # e.g., `[[6,10],[61,72]]`
+                            "soft_labels": hallucination_span_ranges_with_probs,  # e.g., `"[{"start":1,"prob":0.9090909091,"end":6}]`
+                            "model_input": record[
+                                "model_input"
+                            ],  # e.g., "What did Petra van Staveren win a gold medal for?"
+                            "model_output_text": record[
+                                "model_output_text"
+                            ],  # e.g., "Petra van Stoveren won a silver medal in the 2008 Summer Olympics in Beijing, China."
+                            "reference": reference_passages,
+                            "model_input_with_context": model_input_with_context,
+                            "model_id": model_id,
+                            "model_output_logits": model_output_logits,
+                            "model_output_probs": model_output_probs,
+                            "context_given_model_output_logits": context_given_model_output_logits,
+                            "context_given_model_output_probs": context_given_model_output_probs,
+                        }
+                    )
 
         del model
         del tokenizer
-        del model_output_probs, model_output_logits, context_given_model_output_probs, context_given_model_output_logits
+        del (
+            model_output_probs,
+            model_output_logits,
+            context_given_model_output_probs,
+            context_given_model_output_logits,
+        )
 
     for condition in HALLUCINATION_CONDITIONS.keys():
         for threshold in threshold_list:
             predictions = total_predictions[condition][threshold]
-            output_file_directory = os.path.join(args.output_directory, f'{os.path.basename(args.yaml_filepath.replace(".yaml", ""))}')
+            output_file_directory = os.path.join(
+                args.output_directory,
+                f'{os.path.basename(args.yaml_filepath.replace(".yaml", ""))}',
+            )
             if not os.path.exists(output_file_directory):
                 os.makedirs(output_file_directory)
-            output_filepath = os.path.join(output_file_directory, f"{predictions[0]['lang'].lower()}_REFIND_{condition}_{threshold}.jsonl")
+            output_filepath = os.path.join(
+                output_file_directory,
+                f"{predictions[0]['lang'].lower()}_REFIND_{condition}_{threshold}.jsonl",
+            )
             write_jsonl(predictions, output_filepath)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

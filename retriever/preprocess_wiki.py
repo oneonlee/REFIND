@@ -132,7 +132,7 @@ def basic_process(title, text):
 
 def split_list(lst, n):
     """Split a list into n roughly equal parts.
-    
+
     Args:
         lst (list): The list to be split.
         n (int): The number of parts to split the list into.
@@ -162,6 +162,7 @@ def list_to_txt(lst: List[Tuple[str, str]], path):
             text = item[1]
             f.write(f"{title}\t{text}\n")
 
+
 def txt_to_lists(path) -> Tuple[List[str], List[str]]:
     with open(path, "r", encoding="utf-8") as f:
         lines = f.readlines()
@@ -172,10 +173,12 @@ def txt_to_lists(path) -> Tuple[List[str], List[str]]:
             all_title.append(title)
             all_text.append(text)
         return all_title, all_text
-    
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate clean wiki corpus file for indexing.")
+    parser = argparse.ArgumentParser(
+        description="Generate clean wiki corpus file for indexing."
+    )
     parser.add_argument("--dump_path", type=str)
     parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument("--save_path", type=str, default="clean_corpus.jsonl")
@@ -225,7 +228,12 @@ if __name__ == "__main__":
         documents = list(documents.items())
 
         with Pool(processes=args.num_workers) as p:
-            result_list = list(tqdm(p.imap(single_worker, split_list(documents, args.num_workers)), desc="Processing documents in parallel"))
+            result_list = list(
+                tqdm(
+                    p.imap(single_worker, split_list(documents, args.num_workers)),
+                    desc="Processing documents in parallel",
+                )
+            )
         print("Processing documents done")
         result_list = sum(result_list, [])
 
@@ -235,14 +243,14 @@ if __name__ == "__main__":
         all_text = [item[1] for item in result_list]
         del result_list
 
-
     clean_corpus = []
 
-    for idx, item in enumerate(tqdm(zip(all_title, all_text), desc="Chunking documents")):
+    for idx, item in enumerate(
+        tqdm(zip(all_title, all_text), desc="Chunking documents")
+    ):
         title = item[0]
         text = item[1]
         clean_corpus.append({"title": title, "text": text})
-
 
     print("Start saving corpus...")
     with open(args.save_path, "w", encoding="utf-8") as f:
