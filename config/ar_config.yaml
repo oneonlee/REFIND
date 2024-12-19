@@ -6,17 +6,15 @@ FAVA:
     retriever: HybridRetriever
 
 Retriever:
-    language: EN
-    # input_file_path: retriever/sample_wiki_corpus.jsonl
-    input_file_path: retriever/en_wiki_corpus.jsonl
+    language: AR
+    input_file_path: retriever/ar_wiki_corpus.jsonl
     parameters:
         retrieval_chunk_size: 600
         retrieval_chunk_overlap: 30
         retrieval_top_k: 5
 HybridRetriever:
-    language: EN
-    # input_file_path: retriever/sample_wiki_corpus.jsonl
-    input_file_path: retriever/en_wiki_corpus.jsonl
+    language: AR
+    input_file_path: retriever/ar_wiki_corpus.jsonl
     embedding_model_path: intfloat/multilingual-e5-large
     parameters:
         retrieval_chunk_size: 600
