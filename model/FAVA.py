@@ -11,6 +11,7 @@ import numpy as np
 import vllm
 import yaml
 from lib import load_jsonl_file, write_jsonl
+from prompt import FAVA_PROMPT_TEMPLATE as INPUT_PROMPT_TEMPLATE
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
@@ -20,9 +21,6 @@ p.add_argument('--yaml_filepath', type=str, default="en_config.yaml")
 p.add_argument('--input_filepath', type=str)
 p.add_argument('--output_directory', type=str)
 args = p.parse_args()
-
-
-INPUT = "Read the following references:\n{evidence}\nPlease identify all the errors in the following text using the information in the references provided and suggest edits if necessary:\n[Text] {output}\n[Edited] "
 
 
 def softmax(logits):
@@ -68,7 +66,7 @@ def predict_hallucinations(
     sampling_params
 ):
     evidence = "\n".join(evidence_list)
-    prompts = [INPUT.format_map({"evidence": evidence, "output": hallucinated_output})]
+    prompts = [INPUT_PROMPT_TEMPLATE.format_map({"evidence": evidence, "output": hallucinated_output})]
 
     vllm_outputs = model.generate(prompts, sampling_params)
 
@@ -138,9 +136,12 @@ def predict_hallucinations(
         output_probs = softmax(logprob_list)
 
         average_prob = 0
-        for token_idx in range(token_start_idx, token_end_idx+1):
-            average_prob += output_probs[token_idx]
-        average_prob /= (token_end_idx - token_start_idx + 1)
+        try:
+            for token_idx in range(token_start_idx, token_end_idx+1):
+                average_prob += output_probs[token_idx]
+            average_prob /= (token_end_idx - token_start_idx + 1)
+        except ZeroDivisionError:
+            pass
 
         model_output_start_idx = hallucinated_output.find(hallucinated_text)
         model_output_end_idx = model_output_start_idx + len(hallucinated_text)
@@ -197,7 +198,9 @@ if __name__ == "__main__":
             "soft_labels": soft_labels
         })
     
-    output_filepath = os.path.join(args.output_directory, f"{predictions[0]['lang'].lower()}_FAVA.jsonl")
+    if not os.path.exists(os.path.join(args.output_directory, os.path.basename(args.yaml_filepath.replace(".yaml", "")))):
+        os.makedirs(os.path.join(args.output_directory, os.path.basename(args.yaml_filepath.replace(".yaml", ""))))
+    output_filepath = os.path.join(args.output_directory, os.path.basename(args.yaml_filepath.replace(".yaml", "")), f"{predictions[0]['lang'].lower()}_FAVA.jsonl")
     
     try:
         write_jsonl(predictions, output_filepath)
