@@ -80,10 +80,11 @@ def predict_hallucinations(
     FAVA_output_text = FAVA_output_text_list[0]
     offset_mapping = offset_mapping_list[0]
 
-    logprob_list = []
+    prob_list = []
     for token_id, logprob_dict in zip(token_ids_tuple, logprobs_list[0]):
         logprob = logprob_dict[token_id].logprob
-        logprob_list.append(logprob)
+        prob = np.exp(logprob)
+        prob_list.append(prob)
 
     hallucination_spans = _find_hallucination_spans(FAVA_output_text)
 
@@ -132,16 +133,17 @@ def predict_hallucinations(
                 continue
 
         # Calculate the logprob for the hallucinated span
-        logits = logprob_list[token_start_idx:token_end_idx+1]
-        output_probs = softmax(logprob_list)
-
+        
         average_prob = 0
         try:
             for token_idx in range(token_start_idx, token_end_idx+1):
-                average_prob += output_probs[token_idx]
+                average_prob += prob_list[token_idx]
             average_prob /= (token_end_idx - token_start_idx + 1)
         except ZeroDivisionError:
             pass
+        except IndexError:
+            print(f"IndexError: token_start_idx: {token_start_idx}, token_end_idx: {token_end_idx}, len(prob_list): {len(prob_list)}")
+            exit()
 
         model_output_start_idx = hallucinated_output.find(hallucinated_text)
         model_output_end_idx = model_output_start_idx + len(hallucinated_text)
@@ -170,7 +172,12 @@ if __name__ == "__main__":
         logprobs=1
     )
 
-    records = load_jsonl_file(args.input_filepath)
+    try:
+        records = load_jsonl_file(args.input_filepath)
+    except ValueError as e:
+        print(f"Error: {e}")
+        print(f"input_filepath: {args.input_filepath}")
+        exit()
 
     with open(args.yaml_filepath, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
