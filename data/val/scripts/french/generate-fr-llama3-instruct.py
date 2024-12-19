@@ -8,6 +8,7 @@ from transformers import set_seed, AutoTokenizer, AutoModelForCausalLM
 
 set_seed(94326)
 
+HF_TOKEN = "" # Use your own token
 
 def read_data(file_path):
     with open(file_path, 'r') as istr:
@@ -23,11 +24,11 @@ def load_model(model_name):
         device_map='auto',
         trust_remote_code=True,
         cache_dir=".hf",
-        token='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',
+        token=HF_TOKEN,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
-        token='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',
+        token=HF_TOKEN,
     )
     return model, tokenizer
 
