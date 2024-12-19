@@ -1,9 +1,12 @@
 # REFIND: Retrieval Augmented Factual Hallucination Detection in Large Language Models
 
-![](assets/overview.png)
+<div align="center">
+    <img src="assets/overview.png" alt="Overview of REFIND" width="75%">
+</div>
+<br>
 
-- Task & Dataset Info
-    - [SemEval-2025 Task-3 — Mu-SHROOM](https://helsinki-nlp.github.io/shroom/)
+## Task & Dataset Info
+[SemEval-2025 Task-3 — Mu-SHROOM](https://helsinki-nlp.github.io/shroom/)
 
 
 ## Usage
