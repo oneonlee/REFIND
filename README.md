@@ -1,7 +1,7 @@
 # REFIND: Retrieval Augmented Factual Hallucination Detection in Large Language Models
 
 <div align="center">
-    <img src="https://github.com/user-attachments/assets/2fbf29ca-560f-4924-b020-6f1b3488dac6" alt="Overview of REFIND" width="75%">
+    <img src="assets/overview.png" alt="Overview of REFIND" width="75%">
 </div>
 <br>
 
