@@ -43,6 +43,8 @@ def _find_hallucination_spans(output_text):
     spans = []
     for match in matches:
         content = match.group(2).strip()
+        if content == "":
+            continue
         start_idx = processed_output_text.find(content)
         if start_idx != -1:
             end_idx = start_idx + len(content)
@@ -162,6 +164,8 @@ def predict_hallucinations(
             exit()
 
         model_output_start_idx = hallucinated_output.find(hallucinated_text)
+        if model_output_start_idx == -1:
+            continue
         model_output_end_idx = model_output_start_idx + len(hallucinated_text)
 
         hard_labels.append([model_output_start_idx, model_output_end_idx])

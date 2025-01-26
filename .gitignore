@@ -5,6 +5,10 @@ data/val/*
 !data/val/scripts
 !data/val/README-v2.md
 
+data/test/*
+!data/test/README-v1.md
+!data/test/scripts
+
 logs/*
 
 result/*

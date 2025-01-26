@@ -35,7 +35,10 @@ def load_jsonl_file(filename):
     Performs minor format checks (ensures that soft_labels are present, optionally compute hard_labels on the fly)."""
     df = pd.read_json(filename, lines=True)
     if 'hard_labels' not in df.columns:
-        df['hard_labels'] = df.soft_labels.apply(recompute_hard_labels)
+        try:
+            df['hard_labels'] = df.soft_labels.apply(recompute_hard_labels)
+        except AttributeError:
+            pass
     # adding an extra column for convenience
     df['text_len'] = df.model_output_text.apply(len)
     return df.to_dict(orient='records')

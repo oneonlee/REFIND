@@ -62,3 +62,30 @@ from jieba import cut
 
 def ZH_preprocessing_func(text: str) -> List[str]:
     return list(cut(text))
+
+
+# Basque (EU)
+import re
+
+
+def EU_preprocessing_func(text: str) -> List[str]:
+    # Basic tokenization based on whitespace and punctuation
+    return re.findall(r"\b\w+\b", text)
+
+
+# Catalan (CA)
+def CA_preprocessing_func(text: str) -> List[str]:
+    return text.split()
+
+
+# Czech (CS)
+def CS_preprocessing_func(text: str) -> List[str]:
+    return word_tokenize(text, language="czech")
+
+
+# Persian (FA)
+from hazm import word_tokenize as FA_word_tokenize
+
+
+def FA_preprocessing_func(text: str) -> List[str]:
+    return FA_word_tokenize(text)

@@ -5,7 +5,7 @@
 </div>
 <br>
 
-## Task & Dataset Info
+## Task & Dataset Info.
 [SemEval-2025 Task-3 — Mu-SHROOM](https://helsinki-nlp.github.io/shroom/)
 
 
@@ -27,18 +27,37 @@ Download Mu-SHROOM Dataset from [Official Website](https://helsinki-nlp.github.i
 sh scripts/preprocess_wiki.sh
 ```
 
-### Experiment
+### Experiment 
+#### Validation Set
 ```bash
+# Retrieve Contexts
+sh scripts/run_val_retriever.sh
+
 # Our Method
-sh scripts/run_REFIND.sh
+sh scripts/run_val_REFIND.sh
 
 # Baselines
-sh scripts/run_random_guess.sh
-sh scripts/run_XLM-R.sh
-sh scripts/run_FAVA.sh
+sh scripts/run_val_XLM-R.sh
+sh scripts/run_val_FAVA.sh
 
 ## Evaluation
-sh scripts/evaluate.sh
+sh scripts/evaluate_val.sh
+```
+
+#### Test Set
+```bash
+# Retrieve Contexts
+sh scripts/run_test_retriever.sh
+
+# Our Method
+sh scripts/run_test_REFIND.sh
+
+# Baselines
+sh scripts/run_test_XLM-R.sh
+sh scripts/run_test_FAVA.sh
+
+## Evaluation
+sh scripts/evaluate_test.sh
 ```
 
 ## References
