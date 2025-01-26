@@ -71,10 +71,6 @@ class Retriever:
             from retriever.preprocess_func import (
                 CS_preprocessing_func as preprocessing_func,
             )
-        elif language.upper() == "FA":
-            from retriever.preprocess_func import (
-                FA_preprocessing_func as preprocessing_func,
-            )
         else:
             raise ValueError(f"Unsupported language: {language}")
 
@@ -191,10 +187,6 @@ class HybridRetriever(Retriever):
         elif language.upper() == "CS":
             from retriever.preprocess_func import (
                 CS_preprocessing_func as preprocessing_func,
-            )
-        elif language.upper() == "FA":
-            from retriever.preprocess_func import (
-                FA_preprocessing_func as preprocessing_func,
             )
         else:
             raise ValueError(f"Unsupported language: {language}")

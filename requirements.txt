@@ -28,4 +28,3 @@ nltk
 pyarabic # for Arabic language
 jieba # for Chinese language
 indic-nlp-library # for Indian languages
-hazm # for Persian language

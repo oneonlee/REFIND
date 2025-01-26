@@ -81,11 +81,3 @@ def CA_preprocessing_func(text: str) -> List[str]:
 # Czech (CS)
 def CS_preprocessing_func(text: str) -> List[str]:
     return word_tokenize(text, language="czech")
-
-
-# Persian (FA)
-from hazm import word_tokenize as FA_word_tokenize
-
-
-def FA_preprocessing_func(text: str) -> List[str]:
-    return FA_word_tokenize(text)

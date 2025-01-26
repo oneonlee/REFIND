@@ -1,7 +1,7 @@
 #!/bin/bash
 
 score_directory="result"
-for lang in ar ca cs de en es eu fa fi fr it zh; do
+for lang in ar ca cs de en es eu fi fr it zh; do
     test_filepath="data/test/mushroom.${lang}-tst.v1.jsonl"
     pred_directory="model/prediction/val/${lang}_config"
 
