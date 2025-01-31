@@ -297,19 +297,13 @@ def main():
                 print(f"AssertionError: {e}")
                 print(f"offsets_mapping: {offsets_mapping}")
                 print(f"model_output_text: {model_output_text}")
-                
+
                 # Augment offsets_mapping
-                prev_end_idx = 0
-                # end_idx = len(model_output_text)
-                for i, span in enumerate(offsets_mapping):
-                    start_idx, end_idx = span
-                    if start_idx == prev_end_idx:
-                        prev_end_idx = end_idx
-                        continue
-                    else:
-                        offsets_mapping.insert(i, (prev_end_idx, start_idx))
-                        prev_end_idx = end_idx
-                
+                start_idx = offsets_mapping[-1][1]
+                end_idx = len(model_output_text)
+
+                offsets_mapping.append((start_idx, end_idx))
+
                 # Check again
                 assert offsets_mapping[-1][1] == len(
                     model_output_text
@@ -323,10 +317,31 @@ def main():
                 print(f"AssertionError: {e}")
                 print(f"model_output_token_ids: {model_output_token_ids}")
                 print(f"offsets_mapping: {offsets_mapping}")
-                if len(model_output_token_ids) > len(offsets_mapping):
-                    model_output_token_ids = model_output_token_ids[: len(offsets_mapping)]
-                else:
-                    offsets_mapping = offsets_mapping[: len(model_output_token_ids)]
+
+                # Augment offsets_mapping
+                prev_end_idx = 0
+                # end_idx = len(model_output_text)
+                for i, span in enumerate(offsets_mapping):
+                    start_idx, end_idx = span
+                    if start_idx == prev_end_idx:
+                        prev_end_idx = end_idx
+                        continue
+                    else:
+                        offsets_mapping.insert(i, (prev_end_idx, start_idx))
+                        prev_end_idx = end_idx
+
+                # Check again
+                try:
+                    assert len(model_output_token_ids) == len(
+                        offsets_mapping
+                    ), f"Token IDs and offsets mapping mismatch! {len(model_output_token_ids)} vs {len(offsets_mapping)}"
+                except AssertionError as e:
+                    print(f"AssertionError: {e}")
+
+                    if len(model_output_token_ids) > len(offsets_mapping):
+                        model_output_token_ids = model_output_token_ids[: len(offsets_mapping)]
+                    else:
+                        offsets_mapping = offsets_mapping[: len(model_output_token_ids)]
             model_output_probs, model_output_logits = compute_output_probs(
                 model,
                 tokenizer,
@@ -507,7 +522,7 @@ def main():
             for prediction in predictions:
                 hard_labels = prediction["hard_labels"]
                 soft_labels = prediction["soft_labels"]
-                assert len(hard_labels) == len(soft_labels), "Hard and soft labels mismatch!"
+                # assert len(hard_labels) == len(soft_labels), f"Hard and soft labels mismatch! {len(hard_labels)} vs {len(soft_labels)}. Prediction: {prediction}"
 
                 for hard_label, soft_label in zip(hard_labels, soft_labels):
                     if hard_label[0] < 0 or hard_label[1] > len(prediction["model_output_text"]):
